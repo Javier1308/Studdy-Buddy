@@ -449,7 +449,7 @@ export default async function AdminDashboardPage() {
               </p>
             </div>
 
-            <span className="w-fit rounded-full bg-[#F7F5F0] px-4 py-2 text-xs font-extrabold uppercase tracking-[0.08em] text-[#5A6B73]">
+            <span className="inline-flex whitespace-nowrap rounded-full bg-[#E0EFEF] px-4 py-2 text-xs font-extrabold uppercase tracking-[0.08em] text-[#1C2E36]">
               {(deletedCourses ?? []).length} curso{(deletedCourses ?? []).length === 1 ? "" : "s"}
             </span>
           </div>
