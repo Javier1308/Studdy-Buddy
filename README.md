@@ -20,6 +20,28 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Orchestrator-first workflow
+
+For medium or large tasks, use `studdy-buddy-orchestrator` before using any implementation or review agent.
+
+The orchestrator is responsible for:
+
+- classifying the task;
+- selecting the correct agent pipeline;
+- identifying required project skills;
+- deciding required review gates;
+- producing the exact next prompt to run.
+
+Default flow:
+
+```txt
+User request
+→ studdy-buddy-orchestrator
+→ selected planner/builder/reviewer agents
+→ regression-qa
+→ documentation-maintainer if behavior changed
+```
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

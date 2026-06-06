@@ -1,65 +1,74 @@
-import Image from "next/image";
-
+import Link from "next/link";
 export default function Home() {
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+    <main className="min-h-screen bg-[#F7F5F0] text-[#1C2E36]">
+      <section className="mx-auto flex min-h-screen max-w-6xl flex-col justify-center px-6 py-12">
+        <div className="mb-10 inline-block w-fit -rotate-[6deg] bg-[#2E6F87] px-5 py-2">
+          <p className="text-xs font-extrabold uppercase tracking-[0.22em] text-white">
+            Studdy Buddy
           </p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+
+        <div className="grid items-center gap-10 md:grid-cols-[1.1fr_0.9fr]">
+          <div className="space-y-6">
+            <h1 className="max-w-3xl text-5xl font-extrabold leading-[0.95] tracking-[-0.04em] md:text-7xl">
+              Aprende con un buddy que te conoce.
+            </h1>
+
+            <p className="max-w-xl text-lg font-medium leading-8 text-[#5A6B73]">
+              Tutorías personalizadas con conexión humana, apoyadas por una
+              plataforma online y Buddy IA para reforzar lo aprendido entre
+              sesiones.
+            </p>
+
+            <div className="flex flex-wrap gap-3 pt-2">
+              <Link
+                href="/register"
+                className="rounded-lg bg-[#2E6F87] px-5 py-3 text-sm font-semibold text-white shadow-[0_4px_12px_rgba(46,111,135,.10)] hover:bg-[#1F4E60]"
+              >
+                Crear cuenta
+              </Link>
+
+              <Link
+                href="/login"
+                className="rounded-lg border border-[#E2DFD7] bg-white px-5 py-3 text-sm font-semibold text-[#1C2E36] shadow-[0_1px_2px_rgba(46,111,135,.06)] hover:bg-[#E0EFEF]"
+              >
+                Iniciar sesión
+              </Link>
+            </div>
+          </div>
+
+          <div className="relative overflow-hidden rounded-xl bg-[#2E6F87] p-8 shadow-[0_12px_32px_rgba(46,111,135,.14)]">
+            <div className="mb-6 inline-block -rotate-[6deg] bg-[#5BA8AC] px-4 py-2">
+              <p className="text-xs font-extrabold uppercase tracking-[0.18em] text-white">
+                Próxima sesión
+              </p>
+            </div>
+
+            <h2 className="text-3xl font-extrabold tracking-[-0.03em] text-white">
+              Álgebra · ecuaciones lineales
+            </h2>
+
+            <p className="mt-3 max-w-md text-sm font-medium leading-6 text-[#E0EFEF]">
+              Hoy · 17:00 — 18:00 · con Lucía Mora
+            </p>
+
+            <div className="mt-8 flex flex-wrap gap-3">
+              <button className="rounded-lg bg-[#D8C447] px-4 py-3 text-sm font-semibold text-[#1C2E36]">
+                ✦ Entrar a la sesión
+              </button>
+              <button className="rounded-lg bg-white/10 px-4 py-3 text-sm font-semibold text-white">
+                Ver materiales
+              </button>
+            </div>
+
+            <div className="absolute -bottom-8 -right-6 h-36 w-36 rounded-t-full rounded-b-[40%] bg-[#5BA8AC] opacity-90" />
+            <div className="absolute bottom-16 right-10 text-5xl font-extrabold text-[#2E6F87]">
+              dd
+            </div>
+          </div>
         </div>
-      </main>
-    </div>
+      </section>
+    </main>
   );
 }

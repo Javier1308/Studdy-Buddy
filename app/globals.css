@@ -1,26 +1,62 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --sb-teal-900: #1f4e60;
+  --sb-teal-700: #2e6f87;
+  --sb-teal-500: #5ba8ac;
+  --sb-teal-300: #9ccbcc;
+  --sb-teal-100: #e0efef;
+  --sb-mustard-500: #d8c447;
+  --sb-ink: #1c2e36;
+  --sb-slate-500: #5a6b73;
+  --sb-slate-300: #9aa8ae;
+  --sb-divider: #e2dfd7;
+  --sb-page-bg: #f7f5f0;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+* {
+  box-sizing: border-box;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
+html,
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  margin: 0;
+  min-height: 100%;
+  background: var(--sb-page-bg);
+  color: var(--sb-ink);
+}
+
+button,
+a,
+select,
+input[type="file"],
+[role="button"] {
+  cursor: pointer;
+}
+
+button:disabled,
+select:disabled,
+input:disabled,
+textarea:disabled {
+  cursor: not-allowed;
+}
+
+a,
+button {
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease,
+    opacity 160ms ease,
+    transform 120ms ease;
+}
+
+a:hover,
+button:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+a:active,
+button:active:not(:disabled) {
+  transform: translateY(0);
 }
