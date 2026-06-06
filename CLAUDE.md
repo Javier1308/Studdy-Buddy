@@ -102,6 +102,15 @@ app/
   api/       route handlers grouped by domain: auth, chat, files, surveys, admin, tutor, profile
 ```
 
+### Admin course restore
+
+`POST /api/admin/courses/[courseId]/restore` — restores a soft-deleted course.
+
+- Guarded by `requireApprovedApiUser()` + explicit `role === "admin"` check.
+- Sets `courses.deleted_at = null` only. It does **not** touch `student_course_tutors.is_active` (ADR 0001). Assignment reactivation is a separate future feature.
+- Restored courses remain inaccessible to students/tutors whose assignments are still `is_active = false`.
+- Idempotent: if `deleted_at` is already `null`, returns `{ success: true, alreadyRestored: true }`.
+
 ### Styling
 
 Tailwind CSS v4 (PostCSS). Design tokens are inline — primary blue `#2E6F87`, background `#F7F5F0`, text `#1C2E36`. No CSS variables or design system file.

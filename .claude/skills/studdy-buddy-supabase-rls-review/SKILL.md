@@ -35,6 +35,38 @@ Use this skill when a task touches:
 - Do not create destructive migrations without explicit approval.
 ```
 
+## Live database verification rule
+
+**Do not claim that the real Supabase database, RLS policies, indexes, constraints, or Storage policies were verified unless actual live output was inspected.**
+
+Before DB/RLS/Storage review, check whether live access is available through one of:
+
+- Supabase MCP server;
+- Supabase CLI linked to the project;
+- direct database connection;
+- SQL introspection output provided by the user.
+
+### If Supabase MCP is available
+
+Use read-only inspection first via the Supabase MCP tools:
+- `execute_sql` for introspection queries
+- `get_advisors` for security/performance recommendations
+- Do NOT use `apply_migration` for verification queries
+
+### If Supabase MCP is not available
+
+Generate SQL introspection queries and ask the user to run them manually against the live project.
+
+### Labeling requirement
+
+Clearly label the review as one of:
+
+- **`Static code review only`** — No live database access available; review based on code inspection only
+- **`SQL introspection pending`** — Live queries identified but not yet executed; awaiting user to run them
+- **`Live Supabase verification completed`** — Actual live database output inspected; schema/RLS/indexes confirmed
+
+Use this label in the review report heading.
+
 ## Tables to consider
 
 ```txt

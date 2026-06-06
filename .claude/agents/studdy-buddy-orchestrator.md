@@ -124,6 +124,207 @@ Blocker:
 
 ---
 
+## Risk assessment rubric
+
+The orchestrator must use this rubric when assigning complexity, auth risk, DB/RLS/Storage risk, AI/Chat risk, file access risk, admin ops risk, and release risk.
+
+### Complexity criteria
+
+**Low:**
+- Single file or isolated UI/copy change.
+- No auth changes.
+- No DB/RLS/Storage changes.
+- No API behavior change.
+- No student/tutor/admin data visibility change.
+- No AI/context behavior change.
+
+**Medium:**
+- Multiple files.
+- New API route or changed API behavior.
+- Admin action that changes records.
+- Any change to visibility of courses, files, surveys, chats, or assignments.
+- Any change to soft delete, restore, archive, or activation state.
+- Any change that requires regression QA beyond build/lint.
+
+**High:**
+- Auth, ownership, RLS, or Storage policy changes.
+- Cross-role access changes.
+- Student/tutor/course assignment logic changes.
+- File access, extraction, deletion, or context compilation changes.
+- AI chat provider, prompt, guardrail, or course context changes.
+- Migration or schema change.
+- Production release preparation.
+
+**Blocker:**
+- Scope is unclear.
+- Security behavior is unclear.
+- Could expose student data.
+- Could restore or modify user access without explicit confirmation.
+- Could break course/file/chat/survey ownership rules.
+- Could affect production data without rollback plan.
+
+### Auth risk criteria
+
+**None:**
+- No protected data, API, role, or ownership behavior touched.
+
+**Low:**
+- Existing protected flow reused without changing access rules.
+
+**Medium:**
+- New protected route.
+- New admin/tutor/student action.
+- Changed role checks.
+- Changed resource visibility.
+
+**High:**
+- Ownership model changes.
+- Cross-student or cross-tutor access risk.
+- Any change where a user could access another user's course, file, survey, chat, or profile data.
+
+### DB/RLS/Storage risk criteria
+
+**None:**
+- No database, RLS, or Storage behavior touched.
+
+**Low:**
+- Read-only query using existing safe filters.
+
+**Medium:**
+- Update to existing rows.
+- Soft delete or restore behavior.
+- Activation/deactivation logic.
+- Query filter changes involving `deleted_at` or `is_active`.
+
+**High:**
+- Schema migration.
+- RLS policy change.
+- Storage policy change.
+- Bucket path/access change.
+- Query change that could expose deleted or private data.
+
+### AI/Chat risk criteria
+
+**None:**
+- No AI or chat behavior touched.
+
+**Low:**
+- UI-only chat polish.
+
+**Medium:**
+- Prompt wording change.
+- Chat API behavior change.
+- Skill.md structure change.
+- Context loading change.
+
+**High:**
+- AI provider change.
+- Guardrail change.
+- Course context compilation change.
+- Any change that could allow answers outside uploaded academic material.
+
+### File access risk criteria
+
+**None:**
+- No file behavior touched.
+
+**Low:**
+- UI-only file display change.
+
+**Medium:**
+- Upload, preview, extraction, confirmation, delete, or retry behavior change.
+- File status changes.
+
+**High:**
+- Storage path changes.
+- File ownership checks.
+- Cross-student file access risk.
+- Course context compilation from uploaded files.
+
+### Admin ops risk criteria
+
+**None:**
+- No admin behavior touched.
+
+**Low:**
+- Read-only admin UI over existing safe data.
+
+**Medium:**
+- Admin action that changes records.
+- Approval/rejection.
+- Soft delete.
+- Restore.
+- Assignment changes.
+- Tutor/student/course relationship updates.
+
+**High:**
+- Bulk actions.
+- Role changes.
+- Permission changes.
+- Account approval logic changes.
+- Any action that changes what students or tutors can access.
+
+### Release risk criteria
+
+**Low:**
+- Documentation/config-only change.
+
+**Medium:**
+- Feature merged but no production config touched.
+
+**High:**
+- Env vars, deployment, auth settings, SMTP, captcha, rate limiting, RLS, Storage, or AI provider config touched.
+
+### Risk escalation rules
+
+The orchestrator must automatically escalate risk:
+
+- Any restore or soft-delete reversal is at least Medium.
+- Any admin action that modifies records is at least Medium.
+- Any change to `student_course_tutors.is_active` is at least Medium.
+- Any change to auth, ownership, RLS, or Storage is at least High.
+- Any AI provider or guardrail change is at least High.
+- Any file ownership or Storage path change is at least High.
+- If student data visibility could change, risk cannot be Low.
+- If the task requires clarification before safe implementation, complexity is Blocker.
+
+### Required reviewer mapping by risk
+
+**If Auth risk is Medium or High:**
+- require `auth-authorization-reviewer`.
+
+**If DB/RLS/Storage risk is Medium:**
+- require `supabase-schema-rls-reviewer` if query behavior, policies, or indexes may be affected.
+
+**If DB/RLS/Storage risk is High:**
+- require `supabase-schema-rls-reviewer` and `security-reviewer`.
+
+**If AI/Chat risk is Medium or High:**
+- require `ai-chat-guardrails-builder` and `security-reviewer`.
+
+**If File access risk is Medium or High:**
+- require `file-pipeline-builder` and `auth-authorization-reviewer`.
+
+**If Admin ops risk is Medium or High:**
+- require `admin-ops-builder` and `auth-authorization-reviewer`.
+
+**If any risk area is Medium or High:**
+- require `regression-qa`.
+
+### Output requirement
+
+Whenever the orchestrator assigns a risk level, it must include a one-sentence justification for each risk area.
+
+**Example:**
+
+```txt
+- Auth: Low — Reuses existing admin-only guard and does not introduce cross-user access.
+- DB/RLS/Storage: Medium — Restore modifies `courses.deleted_at`, which changes course visibility.
+- Admin ops: Medium — Adds an admin action that modifies persistent records.
+```
+
+---
+
 ## Required pipelines
 
 ### Standard feature

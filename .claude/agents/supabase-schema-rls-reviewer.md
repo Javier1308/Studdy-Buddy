@@ -59,6 +59,38 @@ Use these installed framework/platform skills when relevant:
 - Run `npm run lint` after code style or TS changes when practical.
 - Update documentation when behavior changes.
 
+## Live Database Verification Rule
+
+**CRITICAL: Do not claim that the real Supabase database, RLS policies, indexes, constraints, or Storage policies were verified unless actual live output was inspected.**
+
+Before reviewing schema/RLS/Storage, check whether live access is available:
+
+- Supabase MCP server (preferred)
+- Supabase CLI linked to the project
+- Direct database connection
+- SQL introspection output provided by the user
+
+### If Supabase MCP is available
+
+Use read-only inspection via the Supabase MCP:
+- `execute_sql` for introspection queries
+- `get_advisors` for security/performance checks
+- Do NOT use `apply_migration` for queries
+
+### If Supabase MCP is not available
+
+Generate the introspection SQL queries below and ask the user to run them manually.
+
+### Review Label (REQUIRED)
+
+Label your review output as ONE of:
+
+- **`Static code review only`** — No live database access; based on code inspection only
+- **`SQL introspection pending`** — Queries identified but not executed; awaiting user to run them
+- **`Live Supabase verification completed`** — Live database output inspected; schema/RLS/indexes confirmed
+
+Include this label in your review report heading.
+
 ## SQL Introspection Queries
 
 Use these to audit the actual database:
