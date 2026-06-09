@@ -1,0 +1,421 @@
+{
+  "type": "excalidraw",
+  "version": 2,
+  "source": "https://excalidraw.com",
+  "elements": [
+    {
+      "type": "rectangle",
+      "version": 1,
+      "versionNonce": 1,
+      "isDeleted": false,
+      "id": "client-layer",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "angle": 0,
+      "x": 50,
+      "y": 50,
+      "width": 200,
+      "height": 100,
+      "seed": 12345,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "seed": 12345,
+      "versionNonce": 1,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1680000000000,
+      "link": null,
+      "locked": false,
+      "customData": null,
+      "points": null,
+      "lastCommittedPoint": null,
+      "startBinding": null,
+      "endBinding": null,
+      "startArrowType": null,
+      "endArrowType": null,
+      "backgroundColor": "#e3f2fd",
+      "strokeColor": "#1e1e1e",
+      "text": {
+        "content": "Client Layer\n(React 19 Browser)",
+        "fontSize": 16,
+        "fontFamily": 1,
+        "textAlign": "center",
+        "verticalAlign": "middle",
+        "startIndex": 0,
+        "endIndex": 25,
+        "angleInDegrees": 0,
+        "baseLine": 75
+      }
+    },
+    {
+      "type": "rectangle",
+      "id": "nextjs-layer",
+      "x": 350,
+      "y": 50,
+      "width": 200,
+      "height": 100,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#fff3e0",
+      "roughness": 0,
+      "opacity": 100,
+      "text": {
+        "content": "Next.js 16\nApp Router",
+        "fontSize": 16,
+        "fontFamily": 1,
+        "textAlign": "center",
+        "verticalAlign": "middle"
+      }
+    },
+    {
+      "type": "rectangle",
+      "id": "auth-service",
+      "x": 650,
+      "y": 50,
+      "width": 200,
+      "height": 100,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#f3e5f5",
+      "roughness": 0,
+      "opacity": 100,
+      "text": {
+        "content": "Auth Service\n(Supabase Auth)",
+        "fontSize": 16,
+        "fontFamily": 1,
+        "textAlign": "center",
+        "verticalAlign": "middle"
+      }
+    },
+    {
+      "type": "rectangle",
+      "id": "api-layer-label",
+      "x": 50,
+      "y": 200,
+      "width": 800,
+      "height": 80,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#f1f8e9",
+      "roughness": 0,
+      "opacity": 100,
+      "text": {
+        "content": "API Layer (Route Handlers)",
+        "fontSize": 16,
+        "fontFamily": 1,
+        "textAlign": "center",
+        "verticalAlign": "middle"
+      }
+    },
+    {
+      "type": "rectangle",
+      "id": "auth-routes",
+      "x": 50,
+      "y": 320,
+      "width": 170,
+      "height": 100,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#fce4ec",
+      "roughness": 0,
+      "opacity": 100,
+      "text": {
+        "content": "Auth Routes\n/api/auth",
+        "fontSize": 14,
+        "fontFamily": 1,
+        "textAlign": "center",
+        "verticalAlign": "middle"
+      }
+    },
+    {
+      "type": "rectangle",
+      "id": "chat-routes",
+      "x": 240,
+      "y": 320,
+      "width": 170,
+      "height": 100,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#fce4ec",
+      "roughness": 0,
+      "opacity": 100,
+      "text": {
+        "content": "Chat Routes\n/api/chat",
+        "fontSize": 14,
+        "fontFamily": 1,
+        "textAlign": "center",
+        "verticalAlign": "middle"
+      }
+    },
+    {
+      "type": "rectangle",
+      "id": "file-routes",
+      "x": 430,
+      "y": 320,
+      "width": 170,
+      "height": 100,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#fce4ec",
+      "roughness": 0,
+      "opacity": 100,
+      "text": {
+        "content": "File Routes\n/api/files",
+        "fontSize": 14,
+        "fontFamily": 1,
+        "textAlign": "center",
+        "verticalAlign": "middle"
+      }
+    },
+    {
+      "type": "rectangle",
+      "id": "admin-routes",
+      "x": 620,
+      "y": 320,
+      "width": 170,
+      "height": 100,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#fce4ec",
+      "roughness": 0,
+      "opacity": 100,
+      "text": {
+        "content": "Admin Routes\n/api/admin",
+        "fontSize": 14,
+        "fontFamily": 1,
+        "textAlign": "center",
+        "verticalAlign": "middle"
+      }
+    },
+    {
+      "type": "rectangle",
+      "id": "logic-layer-label",
+      "x": 50,
+      "y": 480,
+      "width": 800,
+      "height": 80,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#e0f2f1",
+      "roughness": 0,
+      "opacity": 100,
+      "text": {
+        "content": "Business Logic Layer (lib/)",
+        "fontSize": 16,
+        "fontFamily": 1,
+        "textAlign": "center",
+        "verticalAlign": "middle"
+      }
+    },
+    {
+      "type": "rectangle",
+      "id": "auth-logic",
+      "x": 50,
+      "y": 620,
+      "width": 170,
+      "height": 100,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#fff9c4",
+      "roughness": 0,
+      "opacity": 100,
+      "text": {
+        "content": "Auth Logic\nrequireApprovedUser()",
+        "fontSize": 12,
+        "fontFamily": 1,
+        "textAlign": "center",
+        "verticalAlign": "middle"
+      }
+    },
+    {
+      "type": "rectangle",
+      "id": "chat-logic",
+      "x": 240,
+      "y": 620,
+      "width": 170,
+      "height": 100,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#fff9c4",
+      "roughness": 0,
+      "opacity": 100,
+      "text": {
+        "content": "Chat Logic\nbuildChatPrompt()",
+        "fontSize": 12,
+        "fontFamily": 1,
+        "textAlign": "center",
+        "verticalAlign": "middle"
+      }
+    },
+    {
+      "type": "rectangle",
+      "id": "file-logic",
+      "x": 430,
+      "y": 620,
+      "width": 170,
+      "height": 100,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#fff9c4",
+      "roughness": 0,
+      "opacity": 100,
+      "text": {
+        "content": "File Logic\nvalidation, extraction",
+        "fontSize": 12,
+        "fontFamily": 1,
+        "textAlign": "center",
+        "verticalAlign": "middle"
+      }
+    },
+    {
+      "type": "rectangle",
+      "id": "ai-provider",
+      "x": 620,
+      "y": 620,
+      "width": 170,
+      "height": 100,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#fff9c4",
+      "roughness": 0,
+      "opacity": 100,
+      "text": {
+        "content": "AI Provider\nMock / Anthropic",
+        "fontSize": 12,
+        "fontFamily": 1,
+        "textAlign": "center",
+        "verticalAlign": "middle"
+      }
+    },
+    {
+      "type": "rectangle",
+      "id": "data-layer-label",
+      "x": 50,
+      "y": 780,
+      "width": 800,
+      "height": 80,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#ede7f6",
+      "roughness": 0,
+      "opacity": 100,
+      "text": {
+        "content": "Data Access Layer (Supabase)",
+        "fontSize": 16,
+        "fontFamily": 1,
+        "textAlign": "center",
+        "verticalAlign": "middle"
+      }
+    },
+    {
+      "type": "rectangle",
+      "id": "postgres-db",
+      "x": 50,
+      "y": 920,
+      "width": 240,
+      "height": 100,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#c8e6c9",
+      "roughness": 0,
+      "opacity": 100,
+      "text": {
+        "content": "PostgreSQL Database\nprofiles, courses, students,\ngrades, student_course_tutors",
+        "fontSize": 12,
+        "fontFamily": 1,
+        "textAlign": "center",
+        "verticalAlign": "middle"
+      }
+    },
+    {
+      "type": "rectangle",
+      "id": "storage",
+      "x": 330,
+      "y": 920,
+      "width": 240,
+      "height": 100,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#c8e6c9",
+      "roughness": 0,
+      "opacity": 100,
+      "text": {
+        "content": "Supabase Storage\ncontexts/ (compiled markdown)\nuploaded_files/ (PDFs, DOCX)",
+        "fontSize": 12,
+        "fontFamily": 1,
+        "textAlign": "center",
+        "verticalAlign": "middle"
+      }
+    },
+    {
+      "type": "rectangle",
+      "id": "rls-policies",
+      "x": 610,
+      "y": 920,
+      "width": 240,
+      "height": 100,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#c8e6c9",
+      "roughness": 0,
+      "opacity": 100,
+      "text": {
+        "content": "RLS Policies\nrow-level security\ndata isolation",
+        "fontSize": 12,
+        "fontFamily": 1,
+        "textAlign": "center",
+        "verticalAlign": "middle"
+      }
+    }
+  ],
+  "appState": {
+    "gridMode": "grid",
+    "gridSize": 20,
+    "gridModeEnabled": false,
+    "viewBackgroundColor": "#ffffff",
+    "zoom": {
+      "value": 1
+    },
+    "scrollX": 0,
+    "scrollY": 0,
+    "currentItemStrokeColor": "#1e1e1e",
+    "currentItemBackgroundColor": "#ffffff",
+    "currentItemFillStyle": "solid",
+    "currentItemStrokeWidth": 1,
+    "currentItemStrokeStyle": "solid",
+    "currentItemRoughness": 0,
+    "currentItemOpacity": 100,
+    "currentItemTextTool": false,
+    "viewModeEnabled": false,
+    "activeTool": {
+      "type": "selection"
+    },
+    "lastPointerDownWith": "mouse",
+    "penDetected": false,
+    "penMode": false,
+    "triangleDirection": "down",
+    "openSidebar": true,
+    "showStatsInDevTools": false,
+    "toast": null,
+    "cursorButton": "up",
+    "scrolledOutside": false,
+    "defaultSidebarDockedState": true,
+    "showExitZenModeBtn": true,
+    "theme": "light",
+    "gridModeEnabled": false,
+    "objectsSnapModeEnabled": false,
+    "activeTool": {
+      "type": "selection"
+    },
+    "snapLines": [],
+    "scrollBackgroundColor": "#ffffff",
+    "zoom": {
+      "value": 1
+    }
+  },
+  "files": {}
+}
