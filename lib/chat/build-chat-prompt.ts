@@ -1,19 +1,21 @@
 export function buildChatPrompt({
   studentMessage,
-  skillMarkdown,
+  personalizationMarkdown,
+  tutorEnrichmentMarkdown,
   courseContextMarkdown,
 }: {
   studentMessage: string;
-  skillMarkdown: string;
+  personalizationMarkdown: string;
+  tutorEnrichmentMarkdown?: string | null;
   courseContextMarkdown: string;
 }) {
   const systemPrompt = `
 Eres Buddy IA, un asistente de estudio personalizado.
 
 Debes responder usando:
-1. El perfil personalizado del estudiante.
+1. El perfil de personalización del estudiante.
 2. El contexto confirmado del curso.
-3. Un estilo claro, guiado y paso a paso.
+3. Un estilo claro, adaptado y paso a paso.
 
 Reglas:
 - No inventes información si no aparece en el material.
@@ -22,10 +24,17 @@ Reglas:
 - Usa ejemplos cercanos a sus intereses cuando sea útil.
 - Evita explicaciones demasiado largas sin verificar comprensión.
 
-PERFIL DEL ESTUDIANTE:
-${skillMarkdown || "No hay skill.md activo."}
+PERFIL DE PERSONALIZACIÓN DEL ESTUDIANTE (fuente principal):
+${personalizationMarkdown}
 
-MATERIAL DEL CURSO:
+${
+  tutorEnrichmentMarkdown
+    ? `ENRIQUECIMIENTO DEL TUTOR (referencia adicional):
+${tutorEnrichmentMarkdown}
+
+`
+    : ""
+}MATERIAL DEL CURSO:
 ${courseContextMarkdown || "No hay material compilado del curso."}
 `.trim();
 

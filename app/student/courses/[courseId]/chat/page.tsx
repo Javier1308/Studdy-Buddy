@@ -61,7 +61,13 @@ export default async function CourseChatPage({ params }: PageProps) {
     id: studentCourseAccess.studentId,
   };
 
-  const [assignmentResult, contextResult, sessionResult] = await Promise.all([
+  const [{ data: studentRecord }, { data: assignmentResult }, { data: contextResult }, { data: sessionResult }] = await Promise.all([
+    admin
+      .from("students")
+      .select("id, active_personalization_md")
+      .eq("profile_id", user.id)
+      .maybeSingle(),
+
     admin
       .from("student_course_tutors")
       .select("id, tutor_id, active_skill_md, active_skill_survey_id")
@@ -85,32 +91,32 @@ export default async function CourseChatPage({ params }: PageProps) {
       .maybeSingle(),
   ]);
 
-  const studentCourseTutor = assignmentResult.data;
-  const context = contextResult.data;
-  const session = sessionResult.data;
+  const studentCourseTutor = assignmentResult;
+  const context = contextResult;
+  const session = sessionResult;
 
   if (!studentCourseTutor) {
     notFound();
   }
 
-  if (!studentCourseTutor.active_skill_md) {
+  if (!studentRecord?.active_personalization_md) {
     return (
       <main className="min-h-screen bg-[#F7F5F0] px-6 py-10 text-[#1C2E36]">
         <section className="mx-auto max-w-3xl rounded-xl border border-[#E2DFD7] bg-white p-8 shadow-[0_4px_12px_rgba(46,111,135,.10)]">
           <h1 className="text-3xl font-extrabold tracking-[-0.03em]">
-            Buddy IA todavía no está disponible para este curso.
+            Completa tu perfil primero.
           </h1>
 
           <p className="mt-3 text-[#5A6B73]">
-            Tu tutor debe activar un skill.md específico para este curso antes de que puedas usar el chat.
+            Para usar Buddy IA necesitas completar el cuestionario de personalización. Esto nos ayudará a adaptar el estudio a tus necesidades.
           </p>
 
           <Link
             prefetch={false}
-            href={`/student/courses/${courseId}`}
+            href="/student/onboarding"
             className="mt-5 inline-block rounded-lg bg-[#2E6F87] px-5 py-3 text-sm font-semibold text-white hover:bg-[#1F4E60]"
           >
-            Volver al curso
+            Completar perfil
           </Link>
         </section>
       </main>
@@ -166,12 +172,18 @@ export default async function CourseChatPage({ params }: PageProps) {
           </h1>
 
           <p className="mt-3 text-[#5A6B73]">
-            Skill del curso: <strong>activa</strong> · Contexto del curso:{" "}
+            Perfil de personalización: <strong>activo</strong> · Contexto del curso:{" "}
             <strong>
               {context?.compile_status === "completed" && context?.storage_path
                 ? "compilado"
                 : "pendiente"}
             </strong>
+            {studentCourseTutor?.active_skill_md && (
+              <>
+                {" · "}
+                Enriquecimiento del tutor: <strong>activo</strong>
+              </>
+            )}
           </p>
         </div>
 

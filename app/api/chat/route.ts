@@ -56,7 +56,7 @@ export async function POST(request: Request) {
       id: studentCourseAccess.studentId,
     };
 
-    const [{ data: course }, { data: studentCourseTutor }, { data: context }] =
+    const [{ data: course }, { data: studentRecord }, { data: studentCourseTutor }, { data: context }] =
       await Promise.all([
         admin
           .from("courses")
@@ -64,6 +64,12 @@ export async function POST(request: Request) {
           .eq("id", courseId)
           .is("deleted_at", null)
           .single(),
+
+        admin
+          .from("students")
+          .select("id, active_personalization_md")
+          .eq("profile_id", approvedUser.id)
+          .maybeSingle(),
 
         admin
           .from("student_course_tutors")
@@ -88,11 +94,11 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!studentCourseTutor.active_skill_md) {
+    if (!studentRecord?.active_personalization_md) {
       return NextResponse.json(
         {
-          error: "skill_not_active",
-          message: "This course does not have an active skill.md yet.",
+          error: "personalization_not_complete",
+          message: "Complete your personalization profile before using chat.",
         },
         { status: 403 }
       );
@@ -182,17 +188,25 @@ Entendí tu pregunta:
 
 Contexto usado:
 - Curso: ${course.name}
-- Skill personalizada del curso: sí
+- Perfil de personalización: sí
 - Material del curso compilado: sí
+${studentCourseTutor?.active_skill_md ? "- Enriquecimiento del tutor: sí" : ""}
 
-Extracto del perfil personalizado del curso:
+Extracto del perfil de personalización:
+${studentRecord.active_personalization_md.slice(0, 1200)}
+
+${
+  studentCourseTutor?.active_skill_md
+    ? `Extracto del enriquecimiento del tutor:
 ${studentCourseTutor.active_skill_md.slice(0, 1200)}
 
-Extracto del material del curso:
+`
+    : ""
+}Extracto del material del curso:
 ${compiledMarkdown.slice(0, 1200)}
 
 Respuesta de prueba:
-Según el material disponible para este curso, puedo ayudarte usando explicaciones adaptadas a tu perfil activo. En la versión real, aquí responderé solo con base en el material confirmado del curso y en tu skill.md activa para este curso.`;
+Según el material disponible para este curso, puedo ayudarte usando explicaciones adaptadas a tu perfil de personalización. En la versión real, aquí responderé solo con base en el material confirmado del curso y en tu perfil personalizado.`;
 
     await admin.from("chat_messages").insert({
       session_id: sessionId,

@@ -56,11 +56,18 @@ export default async function StudentCoursePage({ params }: PageProps) {
 
   const [
     { data: course },
+    { data: studentRecord },
     { data: assignment },
     { data: context },
     { data: uploadedFiles },
   ] = await Promise.all([
     admin.from("courses").select("id, name").eq("id", courseId).is("deleted_at", null).single(),
+
+    admin
+      .from("students")
+      .select("id, active_personalization_md")
+      .eq("profile_id", user.id)
+      .maybeSingle(),
 
     admin
       .from("student_course_tutors")
@@ -94,7 +101,8 @@ export default async function StudentCoursePage({ params }: PageProps) {
 
   const files = (uploadedFiles ?? []) as UploadedFile[];
 
-  const hasActiveSkill = Boolean(assignment.active_skill_md);
+  const hasPersonalization = Boolean(studentRecord?.active_personalization_md);
+  const hasTutorEnrichment = Boolean(assignment.active_skill_md);
   const hasCompiledContext =
     context?.compile_status === "completed" && Boolean(context?.storage_path);
 
@@ -127,9 +135,15 @@ export default async function StudentCoursePage({ params }: PageProps) {
           </h1>
 
           <p className="mt-3 text-[#5A6B73]">
-            Skill del curso:{" "}
-            <strong>{hasActiveSkill ? "activa" : "pendiente"}</strong> · Material:{" "}
+            Personalización:{" "}
+            <strong>{hasPersonalization ? "activa" : "pendiente"}</strong> · Material:{" "}
             <strong>{hasCompiledContext ? "compilado" : "pendiente"}</strong>
+            {hasTutorEnrichment && (
+              <>
+                {" · "}
+                Enriquecimiento del tutor: <strong>activo</strong>
+              </>
+            )}
           </p>
         </div>
 
@@ -139,11 +153,11 @@ export default async function StudentCoursePage({ params }: PageProps) {
           </h2>
 
           <p className="mt-2 text-sm text-[#5A6B73]">
-            El chat requiere una skill activa y material confirmado del curso.
+            El chat requiere tu perfil de personalización y material confirmado del curso.
           </p>
 
           <div className="mt-5">
-            {hasActiveSkill && hasCompiledContext ? (
+            {hasPersonalization && hasCompiledContext ? (
               <Link
                 prefetch={false}
                 href={`/student/courses/${courseId}/chat`}
@@ -155,7 +169,20 @@ export default async function StudentCoursePage({ params }: PageProps) {
               <div className="rounded-lg bg-[#F7F5F0] p-5">
                 <p className="font-bold">Buddy IA aún no está disponible.</p>
                 <p className="mt-2 text-sm text-[#5A6B73]">
-                  Debe existir una skill activa y material confirmado/compilado para este curso.
+                  {!hasPersonalization ? (
+                    <>
+                      Primero debes{" "}
+                      <Link
+                        href="/student/onboarding"
+                        className="font-semibold text-[#2E6F87] underline hover:text-[#1F4E60]"
+                      >
+                        completar tu perfil de personalización
+                      </Link>
+                      .
+                    </>
+                  ) : (
+                    "También necesitas confirmar material del curso para que Buddy IA responda con contexto."
+                  )}
                 </p>
               </div>
             )}

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { LogoutButton } from "@/components/auth/logout-button";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -19,9 +20,13 @@ export default async function StudentDashboardPage() {
 
   const { data: student } = await supabase
     .from("students")
-    .select("id")
+    .select("id, onboarding_completed_at")
     .eq("profile_id", user.id)
     .single();
+
+  if (!student?.onboarding_completed_at) {
+    redirect("/student/onboarding");
+  }
 
   const { data: assignments } = student
     ? await admin
@@ -100,8 +105,15 @@ export default async function StudentDashboardPage() {
                     <p className="font-bold">{course.name}</p>
 
                     <p className="mt-1 text-sm text-[#5A6B73]">
-                      Skill del curso:{" "}
-                      <strong>{hasActiveSkill ? "activa" : "pendiente"}</strong>
+                      Personalización:{" "}
+                      <strong>activa</strong>
+                      {hasActiveSkill && (
+                        <>
+                          {" · "}
+                          Enriquecimiento del tutor:{" "}
+                          <strong>activo</strong>
+                        </>
+                      )}
                     </p>
                   </div>
 
