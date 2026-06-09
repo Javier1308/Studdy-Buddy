@@ -5,6 +5,9 @@ import { requireApprovedApiUser } from "@/lib/auth/require-approved-api-user";
 import { generatePersonalizationMd } from "@/lib/ai/generate-personalization-md";
 import { OnboardingAnswers } from "@/lib/onboarding/questions";
 
+// Rejects emails, URLs, @handles, phone-like digit strings, and private contact info
+const CONTACT_INFO_RE = /(@|https?:\/\/|www\.|[\d]{7,}|\+\d)/i;
+
 const schema = z.object({
   answers: z.object({
     q1: z.enum(["A", "B", "C", "D"]),
@@ -12,7 +15,8 @@ const schema = z.object({
     q3: z.enum(["A", "B", "C", "D"]),
     q4: z.enum(["A", "B", "C", "D"]),
     q5: z.enum(["A", "B", "C", "D"]),
-    q6: z.enum(["A", "B", "C", "D"]),
+    q6: z.enum(["A", "B", "C", "D", "E"]),
+    q6_custom_text: z.string().min(2).max(120).optional(),
     q7: z.enum(["A", "B", "C", "D"]),
     q8: z.enum(["A", "B", "C", "D"]),
   }),
@@ -45,8 +49,37 @@ export async function POST(request: Request) {
       );
     }
 
+    const rawCustom = parsed.data.answers.q6_custom_text?.trim() ?? "";
+
+    if (parsed.data.answers.q6 === "E") {
+      if (rawCustom.length < 2) {
+        return NextResponse.json(
+          { error: "invalid_payload", message: "q6_custom_text is required when q6 is E (min 2 characters)." },
+          { status: 400 }
+        );
+      }
+      if (CONTACT_INFO_RE.test(rawCustom)) {
+        return NextResponse.json(
+          { error: "invalid_payload", message: "q6_custom_text must not contain contact info, URLs, or handles." },
+          { status: 400 }
+        );
+      }
+    }
+
+    // Build the answers object to store; include q6_custom_text only when q6 === "E"
+    const answersToStore: OnboardingAnswers = {
+      q1: parsed.data.answers.q1,
+      q2: parsed.data.answers.q2,
+      q3: parsed.data.answers.q3,
+      q4: parsed.data.answers.q4,
+      q5: parsed.data.answers.q5,
+      q6: parsed.data.answers.q6,
+      ...(parsed.data.answers.q6 === "E" ? { q6_custom_text: rawCustom } : {}),
+      q7: parsed.data.answers.q7,
+      q8: parsed.data.answers.q8,
+    };
+
     const admin = createAdminClient();
-    const answers = parsed.data.answers as OnboardingAnswers;
 
     // Derive studentId from the authenticated user's profile
     const { data: student, error: studentError } = await admin
@@ -63,13 +96,13 @@ export async function POST(request: Request) {
     }
 
     // Generate personalization markdown
-    const personalizationMd = generatePersonalizationMd(answers);
+    const personalizationMd = generatePersonalizationMd(answersToStore);
 
     // Update students table with onboarding data
     const { error: updateError } = await admin
       .from("students")
       .update({
-        onboarding_answers: answers,
+        onboarding_answers: answersToStore,
         active_personalization_md: personalizationMd,
         onboarding_completed_at: new Date().toISOString(),
       })

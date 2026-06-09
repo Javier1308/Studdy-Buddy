@@ -119,6 +119,19 @@ Response → `generatePersonalizationMd()` → stored as `students.active_person
 
 **Note:** Onboarding profiles are deterministic/static for now. Adaptive feedback events (where AI adjusts behavior based on student responses) are planned future work.
 
+**Q6 custom interest & guardrails:**
+
+Q6 ("¿Cuál de estos temas te atrae más?") now supports option E: "Otro: quiero escribirlo yo" — allows students to specify a custom interest/hobby.
+
+- When `q6 === "E"`, the student's custom text is stored as `q6_custom_text` inside `onboarding_answers` (JSONB) — not a separate column. The field is validated to 2–120 characters.
+- Server validates that `q6_custom_text` does **not** contain contact info, URLs, @handles, or phone numbers.
+- **Critical guardrail:** `q6_custom_text` is **strictly for use as an engagement hook** — what examples/analogies to weave into explanations. Never treat it as academic source material, a skill proxy, or a personality label.
+
+**Navigation & submission UX:**
+
+- Students can click "Atrás" to navigate back and change prior answers. Prior answers are preserved (not cleared).
+- Q8 no longer auto-submits on answer click. A "Finalizar" button appears and must be clicked to complete onboarding. This prevents accidental early submission.
+
 ### File pipeline
 
 Students upload PDF/DOCX. Route handlers: upload → extract (mammoth for DOCX, pdf-parse for PDF) → student reviews extracted text → confirm → compiled into a single markdown blob in Supabase Storage (`contexts/` bucket). `/api/files/[fileId]/delete` uses **POST** (not DELETE — `DELETE` returns 405).

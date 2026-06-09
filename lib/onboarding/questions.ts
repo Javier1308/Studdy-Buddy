@@ -1,5 +1,5 @@
 export type OnboardingOption = {
-  code: "A" | "B" | "C" | "D";
+  code: "A" | "B" | "C" | "D" | "E";
   label: string;
 };
 
@@ -15,7 +15,8 @@ export type OnboardingAnswers = {
   q3: "A" | "B" | "C" | "D";
   q4: "A" | "B" | "C" | "D";
   q5: "A" | "B" | "C" | "D";
-  q6: "A" | "B" | "C" | "D";
+  q6: "A" | "B" | "C" | "D" | "E";
+  q6_custom_text?: string;
   q7: "A" | "B" | "C" | "D";
   q8: "A" | "B" | "C" | "D";
 };
@@ -79,6 +80,7 @@ export const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
       { code: "B", label: "Tecnología, videojuegos o aplicaciones." },
       { code: "C", label: "Deportes, música o pasatiempos." },
       { code: "D", label: "Ejemplos del mundo real o carrera profesional." },
+      { code: "E", label: "Otro: quiero escribirlo yo." },
     ],
   },
   {

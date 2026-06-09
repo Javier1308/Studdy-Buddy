@@ -45,6 +45,9 @@ export function generatePersonalizationMd(answers: OnboardingAnswers): string {
     B: "Te engancha con tecnología, videojuegos y aplicaciones modernas.",
     C: "Te engancha con deportes, música y pasatiempos personales.",
     D: "Te engancha con aplicaciones del mundo real y carrera profesional.",
+    E: answers.q6_custom_text
+      ? `Te engancha con: "${answers.q6_custom_text}".`
+      : "Te engancha con un interés personal específico.",
   };
 
   // Map Q7 & Q8 answers to memory and retention
