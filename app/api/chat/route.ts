@@ -3,10 +3,12 @@ import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireApprovedApiUser } from "@/lib/auth/require-approved-api-user";
 import { getStudentCourseAccessContext } from "@/lib/auth/course-access";
+import { getStudentSessionAccessContext } from "@/lib/auth/session-access";
 
 const schema = z.object({
   courseId: z.string().uuid(),
   message: z.string().min(1).max(4000),
+  sessionId: z.string().uuid().optional(),
 });
 
 export async function POST(request: Request) {
@@ -38,7 +40,7 @@ export async function POST(request: Request) {
     }
 
     const admin = createAdminClient();
-    const { courseId, message } = parsed.data;
+    const { courseId, message, sessionId } = parsed.data;
 
     const studentCourseAccess = await getStudentCourseAccessContext({
       user: approvedUser,
@@ -56,7 +58,103 @@ export async function POST(request: Request) {
       id: studentCourseAccess.studentId,
     };
 
-    const [{ data: course }, { data: studentRecord }, { data: studentCourseTutor }, { data: context }] =
+    // Check personalization early to avoid creating phantom sessions
+    const { data: studentRecord } = await admin
+      .from("students")
+      .select("id, active_personalization_md")
+      .eq("profile_id", approvedUser.id)
+      .maybeSingle();
+
+    if (!studentRecord?.active_personalization_md) {
+      return NextResponse.json(
+        {
+          error: "personalization_not_complete",
+          message: "Complete your personalization profile before using chat.",
+        },
+        { status: 403 }
+      );
+    }
+
+    // Handle session validation/creation
+    let resolvedSessionId: string;
+
+    if (sessionId) {
+      // Validate ownership of existing session
+      const sessionAccess = await getStudentSessionAccessContext({
+        user: approvedUser,
+        sessionId,
+      });
+
+      if (!sessionAccess) {
+        return NextResponse.json(
+          { error: "session_not_found", message: "Session not found." },
+          { status: 404 }
+        );
+      }
+
+      // Verify session belongs to this course
+      if (sessionAccess.courseId !== courseId) {
+        return NextResponse.json(
+          { error: "session_not_found", message: "Session not found." },
+          { status: 404 }
+        );
+      }
+
+      resolvedSessionId = sessionId;
+    } else {
+      // Create new session — atomically checks max-3 limit and inserts via RPC
+      // to eliminate the race condition between a count check and insert.
+      const generateTitle = (text: string): string => {
+        const trimmed = text.trim();
+        if (trimmed.length <= 60) return trimmed;
+
+        const truncated = trimmed.slice(0, 60);
+        const lastSpace = truncated.lastIndexOf(" ");
+        return lastSpace > 0 ? truncated.slice(0, lastSpace) : truncated;
+      };
+
+      const title = generateTitle(message);
+
+      const { data: rpcResult, error: rpcError } = await admin.rpc(
+        "create_chat_session_with_limit",
+        {
+          p_student_id: student.id,
+          p_course_id: courseId,
+          p_title: title,
+        }
+      );
+
+      if (rpcError) {
+        return NextResponse.json(
+          { error: "internal_error", message: "Could not create chat session." },
+          { status: 500 }
+        );
+      }
+
+      if (rpcResult?.error === "session_limit_reached") {
+        return NextResponse.json(
+          {
+            error: "session_limit_reached",
+            message: "Maximum 3 active sessions per course.",
+          },
+          { status: 409 }
+        );
+      }
+
+      if (!rpcResult?.success || !rpcResult?.session_id) {
+        return NextResponse.json(
+          {
+            error: "session_create_failed",
+            message: "Could not create chat session.",
+          },
+          { status: 500 }
+        );
+      }
+
+      resolvedSessionId = rpcResult.session_id as string;
+    }
+
+    const [{ data: course }, { data: studentCourseTutor }, { data: context }] =
       await Promise.all([
         admin
           .from("courses")
@@ -64,12 +162,6 @@ export async function POST(request: Request) {
           .eq("id", courseId)
           .is("deleted_at", null)
           .single(),
-
-        admin
-          .from("students")
-          .select("id, active_personalization_md")
-          .eq("profile_id", approvedUser.id)
-          .maybeSingle(),
 
         admin
           .from("student_course_tutors")
@@ -91,16 +183,6 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { error: "course_not_found", message: "Course not found." },
         { status: 404 }
-      );
-    }
-
-    if (!studentRecord?.active_personalization_md) {
-      return NextResponse.json(
-        {
-          error: "personalization_not_complete",
-          message: "Complete your personalization profile before using chat.",
-        },
-        { status: 403 }
       );
     }
 
@@ -141,42 +223,8 @@ export async function POST(request: Request) {
       );
     }
 
-    let sessionId: string;
-
-    const { data: existingSession } = await admin
-      .from("chat_sessions")
-      .select("id")
-      .eq("student_id", student.id)
-      .eq("course_id", courseId)
-      .maybeSingle();
-
-    if (existingSession) {
-      sessionId = existingSession.id;
-    } else {
-      const { data: newSession, error: sessionError } = await admin
-        .from("chat_sessions")
-        .insert({
-          student_id: student.id,
-          course_id: courseId,
-        })
-        .select("id")
-        .single();
-
-      if (sessionError || !newSession) {
-        return NextResponse.json(
-          {
-            error: "session_create_failed",
-            message: sessionError?.message ?? "Could not create chat session.",
-          },
-          { status: 500 }
-        );
-      }
-
-      sessionId = newSession.id;
-    }
-
     await admin.from("chat_messages").insert({
-      session_id: sessionId,
+      session_id: resolvedSessionId,
       role: "user",
       content: message,
     });
@@ -209,13 +257,14 @@ Respuesta de prueba:
 Según el material disponible para este curso, puedo ayudarte usando explicaciones adaptadas a tu perfil de personalización. En la versión real, aquí responderé solo con base en el material confirmado del curso y en tu perfil personalizado.`;
 
     await admin.from("chat_messages").insert({
-      session_id: sessionId,
+      session_id: resolvedSessionId,
       role: "assistant",
       content: assistantMessage,
     });
 
     return NextResponse.json({
       success: true,
+      sessionId: resolvedSessionId,
       assistantMessage,
     });
   } catch (error) {

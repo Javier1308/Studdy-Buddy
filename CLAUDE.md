@@ -48,7 +48,9 @@ Three roles: `student`, `tutor`, `admin`. Every new account starts `approval_sta
 | Server (RLS) | `createServerSupabaseClient()` — `lib/supabase/server.ts` | Server Components |
 | Admin (bypasses RLS) | `createAdminClient()` — `lib/supabase/admin.ts` | Route handlers needing privileged access |
 
-### Authorization helpers (`lib/auth/course-access.ts`)
+### Authorization helpers
+
+**Course & file access** (`lib/auth/course-access.ts`)
 
 Use these for ownership checks — never trust `courseId`/`fileId`/`studentId` directly from the request:
 
@@ -56,7 +58,13 @@ Use these for ownership checks — never trust `courseId`/`fileId`/`studentId` d
 - `getStudentFileAccessContext({ user, fileId })` — validates file ownership and that the course is still active
 - `canAccessStudentCourse({ user, studentId, courseId? })` — admin: all; tutor: own assignments; student: self
 
-When a user lacks access, return `404` (not `403`) to avoid leaking existence of other users' resources.
+**Chat session access** (`lib/auth/session-access.ts`)
+
+- `getStudentSessionAccessContext({ user, sessionId })` — validates that the session belongs to the authenticated student, is not soft-deleted (`deleted_at IS NULL`), and that the student is still actively assigned to the course. Returns `StudentSessionAccessContext` on success or `null` on mismatch.
+
+**Access denial response:**
+
+When a user lacks access (for course, file, or session), always return `404` (not `403`) to avoid leaking existence of other users' resources. Callers of these helpers should check for `null` return and respond with a 404 NextResponse.
 
 ### Database schema (key tables)
 
@@ -68,7 +76,8 @@ When a user lacks access, return `404` (not `403`) to avoid leaking existence of
 - `tutor_feedback_surveys` — max 3 active surveys per student+course; only one can be `is_promoted = true`; cannot delete the promoted one. These are optional enrichments, not required for chat.
 - `uploaded_files` — soft-deleted via `deleted_at`; `extraction_status`: `pending | processing | completed | failed`
 - `course_contexts` — one compiled markdown blob per student+course in Supabase Storage; `compile_status` must be `completed` for chat
-- `chat_sessions` / `chat_messages` — one session per student+course (`UNIQUE`)
+- `chat_sessions` — multi-session per student+course; max 3 active sessions (counted by `deleted_at IS NULL`); no UNIQUE constraint on `(student_id, course_id)`. Columns: `id`, `student_id`, `course_id`, `title` (auto-generated or manually set), `message_count` (denormalized, kept in sync by trigger), `last_message_at` (updated by trigger on `chat_messages` insert), `deleted_at` (soft-delete marker; `NULL` = active)
+- `chat_messages` — linked to `chat_sessions`; soft-deleted sessions automatically exclude their messages via RLS and application logic
 - `profile_update_requests` — `request_type`: `student_grade_change` | `tutor_grades_change`; `UNIQUE(profile_id, request_type) WHERE status = 'pending'`
 
 ### Names — always use `first_name` + `last_name`
@@ -144,6 +153,44 @@ Q6 ("¿Cuál de estos temas te atrae más?") now supports option E: "Otro: quier
 
 Students upload PDF/DOCX. Route handlers: upload → extract (mammoth for DOCX, pdf-parse for PDF) → student reviews extracted text → confirm → compiled into a single markdown blob in Supabase Storage (`contexts/` bucket). `/api/files/[fileId]/delete` uses **POST** (not DELETE — `DELETE` returns 405).
 
+### Chat session management
+
+**Multi-session per course (max 3 active):**
+- Students can create up to 3 active chat sessions per course. "Active" = `deleted_at IS NULL`. Soft-deleted sessions are hidden and do not count toward the limit.
+- Routing: `/student/courses/[courseId]/chat/[sessionId]` (session-scoped). Navigating to `/student/courses/[courseId]/chat` (without sessionId) redirects to the most-recent active session by `last_message_at DESC` DESC.
+- Session list appears in a sidebar; student can create new, rename, or soft-delete sessions.
+- **Ownership & access control:** `getStudentSessionAccessContext({ user, sessionId })` in `lib/auth/session-access.ts` validates that a session belongs to the authenticated student, is not soft-deleted (`deleted_at IS NULL`), and that the student is still actively assigned to the course. Returns `null` on any mismatch (caller returns 404, not 403, to avoid leaking existence).
+
+**Personalization gate (early check):**
+- Before allowing session creation, the API checks that `students.active_personalization_md IS NOT NULL`. If null, returns 403 `personalization_not_complete`. This prevents creation of phantom sessions for students who haven't completed onboarding.
+
+**Auto-generated title + manual rename:**
+- When creating a session via first message (`POST /api/chat` without `sessionId`), the title is auto-generated from the first ~60 characters of the user's message (truncated on a word boundary).
+- Students can rename via `POST /api/chat/sessions/[sessionId]` with `{ title }` (1–80 characters, trimmed and validated server-side).
+- The page header (`SessionHeader`) component shows the title with edit/rename and delete buttons.
+
+**Denormalized message count + trigger sync:**
+- `chat_sessions.message_count` is kept in sync by a PostgreSQL trigger (`sync_session_message_count`) that fires `AFTER INSERT OR DELETE` on `chat_messages`.
+- Trigger increments on INSERT, decrements (with safety floor of 0) on DELETE.
+- On page load, messages are fetched and reversed (oldest-first). The `ChatBox` component uses a `useRef` + `useEffect` to auto-scroll to bottom on mount and after new messages arrive.
+
+**Last activity tracking:**
+- `chat_sessions.last_message_at` is maintained by an existing trigger (`on_chat_message_inserted_update_session`) that fires on `chat_messages` INSERT.
+- Used to sort the session list and to redirect `/chat` to the most-recent session.
+
+**Soft-delete (no hard-delete):**
+- `DELETE /api/chat/sessions/[sessionId]` HTTP method is **not supported** (returns 405). Use `POST /api/chat/sessions/[sessionId]` with `{ action: "delete" }` instead.
+- Delete action sets `chat_sessions.deleted_at = now()` (soft-delete). The session is immediately hidden from lists and returns 404 if accessed directly. `chat_messages` associated with the session are preserved for audit; RLS filters them out automatically (soft-deleted sessions cannot be accessed).
+- RLS policies on both `chat_sessions` and `chat_messages` include the clause `deleted_at IS NULL` to exclude soft-deleted sessions from all queries.
+
+**Max-3 enforcement (atomic, server-side):**
+- Enforced atomically via the RPC `public.create_chat_session_with_limit(p_student_id, p_course_id, p_title)`.
+- Session creation paths (`POST /api/chat/sessions` and `POST /api/chat` when `sessionId` is absent) call this RPC instead of the traditional INSERT.
+- The RPC uses `pg_advisory_xact_lock(hashtext(student_id || ':' || course_id)::bigint)` to serialize concurrent create requests for the same (student, course) pair, preventing race conditions. The lock is held for the duration of the transaction and automatically released afterward.
+- Returns `{ error: 'session_limit_reached' }` if the student already has 3 active (non-soft-deleted) sessions for that course.
+- Returns `{ success: true, session_id: <uuid> }` on success.
+- The UI (`SessionActions` component) displays a warning and disables the "Nuevo chat" button when the student has 3 active sessions.
+
 ### Route structure
 
 ```
@@ -152,15 +199,22 @@ app/
   profile/   shared across all roles; /admin|student|tutor/profile should redirect here
   student/   layout guards role=student
     dashboard/          student's course list; redirects to /onboarding if not completed
-    onboarding/         8-question flow (NEW); stores personalization profile
+    onboarding/         8-question flow; stores personalization profile
     courses/[courseId]/
       page.tsx          course overview
-      chat/             AI chat UI (NEW: requires active_personalization_md)
+      chat/             
+        layout.tsx      session list sidebar + outlet
+        page.tsx        redirects to most-recent active session by last_message_at DESC
+        [sessionId]/page.tsx (multi-session chat view; displays session title + messages)
   tutor/     layout guards role=tutor; students/[studentId]/courses/[courseId]/survey manages optional enrichment
   admin/     layout guards role=admin; dashboard manages accounts, courses, assignments, update requests
   api/       route handlers grouped by domain: auth, chat, files, surveys, admin, tutor, profile
-    student/onboarding/ (NEW) POST: saves student's 8 answers + generated personalization profile
-    chat/               (UPDATED) POST: now requires active_personalization_md; tutor skill.md optional
+    student/onboarding/ POST: saves student's 8 answers + generated personalization profile
+    chat/               
+      route.ts          POST: send message (optional sessionId; enforces max-3 active sessions via RPC; auto-generates title from first message)
+      sessions/
+        route.ts        GET: list active sessions per course; POST: create new session (enforces max-3 via RPC; requires personalization_md)
+        [sessionId]/route.ts (POST: { action: 'rename' | 'delete' } — rename or soft-delete session; no HTTP DELETE method)
 ```
 
 ### Admin course restore
@@ -192,6 +246,32 @@ app/
 - Chat API returns 403 `personalization_not_complete` if `active_personalization_md = NULL`
 - No backfill or forced onboarding; students redirect naturally on next login
 - All existing chat history in `chat_messages` is preserved but inaccessible until onboarding completes
+
+### Database migrations — chat sessions
+
+Multi-session chat required four migrations (in order):
+
+1. **`20260610000001_enable_multi_session_chat.sql`**
+   - Adds `deleted_at` column (soft-delete marker) to `chat_sessions`
+   - Adds `message_count` column (denormalized count of messages)
+   - Backfills message counts from existing `chat_messages`
+   - Drops the `chat_sessions_student_course_unique` constraint (enables multiple sessions per student+course)
+   - Creates index `idx_sessions_active_recent` on `(student_id, course_id, last_message_at DESC)` WHERE `deleted_at IS NULL` (for efficient listing of active sessions by recency)
+   - Updates RLS policy on `chat_sessions` to filter by `deleted_at IS NULL`
+   - Updates RLS policy on `chat_messages` to exclude messages from soft-deleted sessions
+
+2. **`20260610000002_add_message_count_trigger.sql`**
+   - Creates trigger `sync_session_message_count` on `chat_messages` (AFTER INSERT OR DELETE)
+   - Maintains `chat_sessions.message_count` in sync: increments on INSERT, decrements (floor 0) on DELETE
+
+3. **`20260610000003_create_chat_session_with_limit_rpc.sql`**
+   - Initial RPC (superseded by migration 004; kept for audit)
+   - Counts active sessions and enforces max-3 limit without race condition protection
+
+4. **`20260610000004_fix_session_limit_race_with_advisory_lock.sql`**
+   - Corrected RPC with advisory lock (active)
+   - Uses `pg_advisory_xact_lock(hashtext(student_id || ':' || course_id)::bigint)` to serialize concurrent creates for the same (student, course)
+   - Guarantees atomicity: no two concurrent requests can both pass the count check and create a 4th session
 
 ### Styling
 

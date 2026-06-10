@@ -1,7 +1,7 @@
 "use client";
 
 import type React from "react";
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 
 type Message = {
   role: "user" | "assistant";
@@ -10,15 +10,26 @@ type Message = {
 
 export function ChatBox({
   courseId,
+  sessionId,
   initialMessages,
 }: {
   courseId: string;
+  sessionId: string;
   initialMessages: Message[];
 }) {
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
@@ -49,6 +60,7 @@ export function ChatBox({
         },
         body: JSON.stringify({
           courseId,
+          sessionId,
           message: trimmed,
         }),
       });
@@ -107,6 +119,7 @@ export function ChatBox({
             Buddy está pensando...
           </div>
         )}
+        <div ref={messagesEndRef} />
       </div>
 
       <div className="border-t border-[#E2DFD7] p-6">
