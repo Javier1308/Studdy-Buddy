@@ -113,6 +113,14 @@ After admin approval, students are redirected to `/student/onboarding` on first 
 
 Response → `generatePersonalizationMd()` → stored as `students.active_personalization_md`. This becomes the primary source for chat AI prompting.
 
+**Onboarding completion guarantee (product rule):**
+
+Onboarding **must be completed in one session**. Partial progress is **never** persisted. Answers are saved to the database **only when** the student clicks "Finalizar" on Q8. If the student closes the browser, refreshes the page, or navigates away before completing all 8 questions and clicking "Finalizar", they must start the flow again from Q1.
+
+*Why:* This constraint ensures clarity of intent and prevents abandonment/incomplete profile scenarios. Students should feel deliberate about submitting their responses.
+
+*How to apply:* Do not introduce localStorage, sessionStorage, autosave, draft persistence, or partial database saves for onboarding answers unless this rule is explicitly changed. The only exception is in-memory state for the current session (React state during the flow). The dashboard and chat API gates (see below) enforce that onboarding is either complete or not started.
+
 **Onboarding is required** to access chat. Existing students will be redirected to onboarding on next login. Gates:
 - Dashboard: `students.onboarding_completed_at IS NOT NULL` required
 - Chat API: `students.active_personalization_md IS NOT NULL` required
