@@ -47,11 +47,7 @@ export default async function SessionPage({ params }: PageProps) {
 
   return (
     <div className="space-y-6">
-      <SessionHeader
-        courseId={courseId}
-        sessionId={sessionId}
-        sessionTitle={sessionAccess.title}
-      />
+      <SessionHeader sessionTitle={sessionAccess.title} />
 
       <ChatBox
         courseId={courseId}

@@ -8,6 +8,14 @@ import { getStudentCourseAccessContext } from "@/lib/auth/course-access";
 import { SessionList } from "./session-list";
 import { SessionActions } from "./session-actions";
 
+export type ChatSession = {
+  id: string;
+  title: string;
+  messageCount: number;
+  lastMessageAt: string | null;
+  lastMessagePreview: string | null;
+};
+
 type LayoutProps = {
   children: React.ReactNode;
   params: Promise<{
@@ -76,6 +84,35 @@ export default async function ChatLayout({ children, params }: LayoutProps) {
     );
   }
 
+  // Fetch active sessions server-side with last message preview
+  const { data: rawSessions } = await admin
+    .from("chat_sessions")
+    .select("id, title, message_count, last_message_at")
+    .eq("student_id", studentCourseAccess.studentId)
+    .eq("course_id", courseId)
+    .is("deleted_at", null)
+    .order("last_message_at", { ascending: false });
+
+  const sessions: ChatSession[] = await Promise.all(
+    (rawSessions || []).map(async (session) => {
+      const { data: latestMessage } = await admin
+        .from("chat_messages")
+        .select("content")
+        .eq("session_id", session.id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      return {
+        id: session.id,
+        title: session.title,
+        messageCount: session.message_count,
+        lastMessageAt: session.last_message_at,
+        lastMessagePreview: latestMessage?.content?.slice(0, 100) ?? null,
+      };
+    })
+  );
+
   return (
     <main className="min-h-screen bg-[#F7F5F0] px-6 py-10 text-[#1C2E36]">
       <section className="mx-auto max-w-7xl">
@@ -106,9 +143,9 @@ export default async function ChatLayout({ children, params }: LayoutProps) {
                 Chats
               </p>
 
-              <SessionActions courseId={courseId} />
+              <SessionActions courseId={courseId} sessionCount={sessions.length} />
 
-              <SessionList courseId={courseId} studentId={student.id} />
+              <SessionList courseId={courseId} sessions={sessions} />
             </div>
           </aside>
 

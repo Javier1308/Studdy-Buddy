@@ -262,11 +262,14 @@ Según el material disponible para este curso, puedo ayudarte usando explicacion
       content: assistantMessage,
     });
 
-    return NextResponse.json({
-      success: true,
-      sessionId: resolvedSessionId,
-      assistantMessage,
-    });
+    return NextResponse.json(
+      {
+        success: true,
+        sessionId: resolvedSessionId,
+        assistantMessage,
+      },
+      { status: 201 }
+    );
   } catch (error) {
     console.error("CHAT_ERROR", error);
 

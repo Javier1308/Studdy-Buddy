@@ -2,16 +2,20 @@ import { redirect, notFound } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getApprovedUserOrRedirect } from "@/lib/auth/require-approved-user";
 import { getStudentCourseAccessContext } from "@/lib/auth/course-access";
+import { ComposeState } from "./compose-state";
 
 type PageProps = {
   params: Promise<{
     courseId: string;
   }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 };
 
-export default async function CourseChatPage({ params }: PageProps) {
+export default async function CourseChatPage({ params, searchParams }: PageProps) {
   const approvedUser = await getApprovedUserOrRedirect();
   const { courseId } = await params;
+  const resolvedSearchParams = await searchParams;
+  const isNewCompose = resolvedSearchParams["new"] === "1";
 
   const studentCourseAccess = await getStudentCourseAccessContext({
     user: approvedUser,
@@ -20,6 +24,11 @@ export default async function CourseChatPage({ params }: PageProps) {
 
   if (!studentCourseAccess) {
     notFound();
+  }
+
+  // If ?new=1 is present, render compose state (no redirect to existing session)
+  if (isNewCompose) {
+    return <ComposeState courseId={courseId} />;
   }
 
   const admin = createAdminClient();
@@ -38,12 +47,6 @@ export default async function CourseChatPage({ params }: PageProps) {
     redirect(`/student/courses/${courseId}/chat/${mostRecentSession.id}`);
   }
 
-  // No sessions exist — render an empty state inside the layout (sidebar stays visible).
-  return (
-    <div className="flex h-64 items-center justify-center rounded-xl border border-[#E2DFD7] bg-white shadow-[0_4px_12px_rgba(46,111,135,.10)]">
-      <p className="text-sm text-[#5A6B73]">
-        Crea un nuevo chat para empezar.
-      </p>
-    </div>
-  );
+  // No sessions exist — show compose state so the student can start their first chat
+  return <ComposeState courseId={courseId} />;
 }

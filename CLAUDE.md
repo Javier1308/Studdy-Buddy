@@ -157,17 +157,31 @@ Students upload PDF/DOCX. Route handlers: upload → extract (mammoth for DOCX, 
 
 **Multi-session per course (max 3 active):**
 - Students can create up to 3 active chat sessions per course. "Active" = `deleted_at IS NULL`. Soft-deleted sessions are hidden and do not count toward the limit.
-- Routing: `/student/courses/[courseId]/chat/[sessionId]` (session-scoped). Navigating to `/student/courses/[courseId]/chat` (without sessionId) redirects to the most-recent active session by `last_message_at DESC` DESC.
-- Session list appears in a sidebar; student can create new, rename, or soft-delete sessions.
+- Routing: `/student/courses/[courseId]/chat/[sessionId]` (session-scoped). Navigating to `/student/courses/[courseId]/chat` redirects to the most-recent active session by `last_message_at DESC`, or shows the compose state if no sessions exist.
+- Session list appears in a sidebar (server-fetched in `layout.tsx`, passed as props to `SessionList`). Students can create new, rename, or soft-delete sessions.
 - **Ownership & access control:** `getStudentSessionAccessContext({ user, sessionId })` in `lib/auth/session-access.ts` validates that a session belongs to the authenticated student, is not soft-deleted (`deleted_at IS NULL`), and that the student is still actively assigned to the course. Returns `null` on any mismatch (caller returns 404, not 403, to avoid leaking existence).
 
+**Lazy session creation (compose state):**
+- Clicking "Nuevo chat" navigates to `/student/courses/[courseId]/chat?new=1` (no API call, no DB row yet).
+- `POST /api/chat/sessions` (eager-create endpoint) **no longer exists**. GET remains for legacy compatibility.
+- A DB session row is created **only when the first message is sent** via `POST /api/chat` without a `sessionId`.
+- Empty sessions cannot exist: if the student navigates away before sending a message, no row is created.
+- This eliminates phantom (empty) sessions in the sidebar.
+
 **Personalization gate (early check):**
-- Before allowing session creation, the API checks that `students.active_personalization_md IS NOT NULL`. If null, returns 403 `personalization_not_complete`. This prevents creation of phantom sessions for students who haven't completed onboarding.
+- Before allowing session creation, `POST /api/chat` checks that `students.active_personalization_md IS NOT NULL`. If null, returns 403 `personalization_not_complete`. This prevents creation of phantom sessions for students who haven't completed onboarding.
 
 **Auto-generated title + manual rename:**
 - When creating a session via first message (`POST /api/chat` without `sessionId`), the title is auto-generated from the first ~60 characters of the user's message (truncated on a word boundary).
-- Students can rename via `POST /api/chat/sessions/[sessionId]` with `{ title }` (1–80 characters, trimmed and validated server-side).
-- The page header (`SessionHeader`) component shows the title with edit/rename and delete buttons.
+- Students can rename via the three-dot context menu in the sidebar (`RenameSessionDialog`), which posts to `POST /api/chat/sessions/[sessionId]` with `{ title }` (1–80 characters, trimmed and validated server-side).
+- Session title is displayed in `SessionHeader` as a plain read-only heading; edit/delete buttons have been removed from the header and moved to the sidebar context menu.
+
+**Sidebar context menu (ChatGPT-style):**
+- Each session row in `SessionList` shows a three-dot menu button on hover (or when the menu is open).
+- Menu has two items: "Renombrar" (opens `RenameSessionDialog`) and "Eliminar" (opens `DeleteSessionDialog`).
+- Both dialogs apply optimistic local mutations immediately, then call `router.refresh()` to reconcile the server state.
+- On delete of the currently-open session: redirect to next most-recent session, or to `?new=1` if none remain.
+- On delete of a non-open session: remove from list without navigation.
 
 **Denormalized message count + trigger sync:**
 - `chat_sessions.message_count` is kept in sync by a PostgreSQL trigger (`sync_session_message_count`) that fires `AFTER INSERT OR DELETE` on `chat_messages`.
@@ -185,11 +199,11 @@ Students upload PDF/DOCX. Route handlers: upload → extract (mammoth for DOCX, 
 
 **Max-3 enforcement (atomic, server-side):**
 - Enforced atomically via the RPC `public.create_chat_session_with_limit(p_student_id, p_course_id, p_title)`.
-- Session creation paths (`POST /api/chat/sessions` and `POST /api/chat` when `sessionId` is absent) call this RPC instead of the traditional INSERT.
+- `POST /api/chat` (when `sessionId` is absent) calls this RPC instead of the traditional INSERT.
 - The RPC uses `pg_advisory_xact_lock(hashtext(student_id || ':' || course_id)::bigint)` to serialize concurrent create requests for the same (student, course) pair, preventing race conditions. The lock is held for the duration of the transaction and automatically released afterward.
-- Returns `{ error: 'session_limit_reached' }` if the student already has 3 active (non-soft-deleted) sessions for that course.
+- Returns `{ error: 'session_limit_reached' }` if the student already has 3 active (non-soft-deleted) sessions for that course. On 409, `ChatBox` shows the error and **preserves the typed message** so the student does not lose their input.
 - Returns `{ success: true, session_id: <uuid> }` on success.
-- The UI (`SessionActions` component) displays a warning and disables the "Nuevo chat" button when the student has 3 active sessions.
+- The UI (`SessionActions` component, receiving `sessionCount` as a prop from the layout) displays a warning and disables the "Nuevo chat" button when the student has 3 active sessions.
 
 ### Route structure
 
@@ -203,9 +217,16 @@ app/
     courses/[courseId]/
       page.tsx          course overview
       chat/             
-        layout.tsx      session list sidebar + outlet
-        page.tsx        redirects to most-recent active session by last_message_at DESC
-        [sessionId]/page.tsx (multi-session chat view; displays session title + messages)
+        layout.tsx      server-fetches session list, passes as props to SessionList and SessionActions
+        page.tsx        ?new=1 → compose state; no sessions → compose state; sessions → redirect to most-recent by last_message_at DESC
+        compose-state.tsx  compose UI (title placeholder + ChatBox in create mode)
+        session-list.tsx   client component; accepts sessions prop; three-dot context menu (rename/delete)
+        session-actions.tsx client component; accepts sessionCount prop; "Nuevo chat" navigates to ?new=1
+        delete-session-dialog.tsx modal; POST { action:"delete" }; optimistic remove + router.refresh()
+        rename-session-dialog.tsx modal; POST { title }; optimistic update + router.refresh()
+        [sessionId]/
+          page.tsx      session view; passes sessionId to ChatBox
+          session-header.tsx  read-only title display (edit/delete buttons removed; interactions in sidebar)
   tutor/     layout guards role=tutor; students/[studentId]/courses/[courseId]/survey manages optional enrichment
   admin/     layout guards role=admin; dashboard manages accounts, courses, assignments, update requests
   api/       route handlers grouped by domain: auth, chat, files, surveys, admin, tutor, profile
@@ -213,8 +234,8 @@ app/
     chat/               
       route.ts          POST: send message (optional sessionId; enforces max-3 active sessions via RPC; auto-generates title from first message)
       sessions/
-        route.ts        GET: list active sessions per course; POST: create new session (enforces max-3 via RPC; requires personalization_md)
-        [sessionId]/route.ts (POST: { action: 'rename' | 'delete' } — rename or soft-delete session; no HTTP DELETE method)
+        route.ts        GET: list active sessions per course (POST removed — lazy create only)
+        [sessionId]/route.ts (POST: { title } to rename; POST: { action: "delete" } to soft-delete; no HTTP DELETE method)
 ```
 
 ### Admin course restore

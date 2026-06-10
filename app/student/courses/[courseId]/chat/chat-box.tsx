@@ -2,26 +2,26 @@
 
 import type React from "react";
 import { useState, useRef, useEffect } from "react";
+import { useRouter } from "next/navigation";
 
 type Message = {
   role: "user" | "assistant";
   content: string;
 };
 
-export function ChatBox({
-  courseId,
-  sessionId,
-  initialMessages,
-}: {
+type Props = {
   courseId: string;
-  sessionId: string;
+  sessionId?: string;
   initialMessages: Message[];
-}) {
+};
+
+export function ChatBox({ courseId, sessionId, initialMessages }: Props) {
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const router = useRouter();
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -45,6 +45,10 @@ export function ChatBox({
 
     setLoading(true);
     setError("");
+
+    // Only clear input when not in compose mode, or clear after success in compose mode
+    // In compose mode we preserve input on limit error (restored below)
+    const savedInput = trimmed;
     setInput("");
 
     setMessages((current) => [
@@ -53,22 +57,44 @@ export function ChatBox({
     ]);
 
     try {
+      const payload: Record<string, string> = {
+        courseId,
+        message: trimmed,
+      };
+
+      if (sessionId) {
+        payload.sessionId = sessionId;
+      }
+
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          courseId,
-          sessionId,
-          message: trimmed,
-        }),
+        body: JSON.stringify(payload),
       });
 
       const data = await response.json();
 
       if (!response.ok) {
+        // Remove the optimistic user message on error
+        setMessages((current) => current.slice(0, -1));
+
+        if (response.status === 409 && data.error === "session_limit_reached") {
+          // Preserve typed message so the student doesn't lose it
+          setInput(savedInput);
+          setError("Máximo 3 chats por curso. Elimina uno para crear otro.");
+          return;
+        }
+
+        if (response.status === 403 && data.error === "personalization_not_complete") {
+          setInput(savedInput);
+          setError("Completa tu perfil primero.");
+          return;
+        }
+
         setError(data.message ?? "No se pudo enviar el mensaje.");
+        setInput(savedInput);
         return;
       }
 
@@ -76,7 +102,16 @@ export function ChatBox({
         ...current,
         { role: "assistant", content: data.assistantMessage },
       ]);
+
+      // In compose mode (no sessionId), navigate to the newly-created session
+      if (!sessionId && data.sessionId) {
+        router.push(`/student/courses/${courseId}/chat/${data.sessionId}`);
+        router.refresh();
+      }
     } catch {
+      // Remove the optimistic user message on network error
+      setMessages((current) => current.slice(0, -1));
+      setInput(savedInput);
       setError("Ocurrió un error inesperado.");
     } finally {
       setLoading(false);
@@ -131,7 +166,7 @@ export function ChatBox({
 
         <div className="flex gap-3">
           <textarea
-                  onKeyDown={handleKeyDown}
+            onKeyDown={handleKeyDown}
             value={input}
             onChange={(event) => setInput(event.target.value)}
             placeholder="Escribe tu pregunta..."
