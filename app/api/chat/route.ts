@@ -4,6 +4,11 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { requireApprovedApiUser } from "@/lib/auth/require-approved-api-user";
 import { getStudentCourseAccessContext } from "@/lib/auth/course-access";
 import { getStudentSessionAccessContext } from "@/lib/auth/session-access";
+import { generateChatResponse } from "@/lib/chat/provider";
+import { retrieveRelevantCourseSections } from "@/lib/chat/retrieve-context-sections";
+
+const OUT_OF_SCOPE_REFUSAL =
+  "No encontré información sobre eso en el material de este curso. Te recomiendo revisar tus apuntes o consultar con tu tutor.";
 
 const schema = z.object({
   courseId: z.string().uuid(),
@@ -154,6 +159,27 @@ export async function POST(request: Request) {
       resolvedSessionId = rpcResult.session_id as string;
     }
 
+    // Fetch bounded conversation history from the current validated session.
+    // This is done after resolvedSessionId is confirmed and before inserting the
+    // current user message, so the current turn is not included in history.
+    const { data: historyRows, error: historyError } = await admin
+      .from("chat_messages")
+      .select("role, content")
+      .eq("session_id", resolvedSessionId)
+      .order("created_at", { ascending: false })
+      .limit(10);
+
+    if (historyError) {
+      console.error("CHAT_HISTORY_ERROR", historyError.message);
+    }
+
+    const conversationHistory = (historyRows ?? [])
+      .reverse()
+      .filter(
+        (m): m is { role: "user" | "assistant"; content: string } =>
+          m.role === "user" || m.role === "assistant"
+      );
+
     const [{ data: course }, { data: studentCourseTutor }, { data: context }] =
       await Promise.all([
         admin
@@ -204,8 +230,7 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           error: "context_download_failed",
-          message:
-            contextDownloadError?.message ?? "Could not download compiled course material.",
+          message: "Could not download compiled course material.",
         },
         { status: 500 }
       );
@@ -223,44 +248,99 @@ export async function POST(request: Request) {
       );
     }
 
-    await admin.from("chat_messages").insert({
+    // Retrieve only the sections relevant to the current question + recent
+    // history. This replaces full-blob injection with topic-scoped context.
+    const { found: sectionsFound, contextString: courseContextMarkdown } =
+      retrieveRelevantCourseSections({
+        compiledMarkdown,
+        studentMessage: message,
+        conversationHistory,
+      });
+
+    // Persist user message before any AI call (same as before — message must
+    // never be lost even when the provider or the retrieval returns nothing).
+    const { error: userMessageError } = await admin.from("chat_messages").insert({
       session_id: resolvedSessionId,
       role: "user",
       content: message,
     });
 
-    const assistantMessage = `Respuesta mock de Buddy IA.
+    if (userMessageError) {
+      console.error("CHAT_MESSAGE_INSERT_ERROR", userMessageError.message);
+      return NextResponse.json(
+        { error: "internal_error", message: "Could not persist message." },
+        { status: 500 }
+      );
+    }
 
-Entendí tu pregunta:
-"${message}"
+    let assistantMessage: string;
 
-Contexto usado:
-- Curso: ${course.name}
-- Perfil de personalización: sí
-- Material del curso compilado: sí
-${studentCourseTutor?.active_skill_md ? "- Enriquecimiento del tutor: sí" : ""}
+    if (!sectionsFound) {
+      // Hard backend refusal — no AI provider call.
+      // Insert the refusal as an assistant turn so the student sees it in the
+      // session and history remains consistent.
+      assistantMessage = OUT_OF_SCOPE_REFUSAL;
 
-Extracto del perfil de personalización:
-${studentRecord.active_personalization_md.slice(0, 1200)}
+      const { error: refusalInsertError } = await admin.from("chat_messages").insert({
+        session_id: resolvedSessionId,
+        role: "assistant",
+        content: assistantMessage,
+      });
 
-${
-  studentCourseTutor?.active_skill_md
-    ? `Extracto del enriquecimiento del tutor:
-${studentCourseTutor.active_skill_md.slice(0, 1200)}
+      if (refusalInsertError) {
+        console.error("CHAT_MESSAGE_INSERT_ERROR", refusalInsertError.message);
+        return NextResponse.json(
+          { error: "internal_error", message: "Could not persist response." },
+          { status: 500 }
+        );
+      }
 
-`
-    : ""
-}Extracto del material del curso:
-${compiledMarkdown.slice(0, 1200)}
+      return NextResponse.json(
+        {
+          success: true,
+          sessionId: resolvedSessionId,
+          assistantMessage,
+        },
+        { status: 201 }
+      );
+    }
 
-Respuesta de prueba:
-Según el material disponible para este curso, puedo ayudarte usando explicaciones adaptadas a tu perfil de personalización. En la versión real, aquí responderé solo con base en el material confirmado del curso y en tu perfil personalizado.`;
+    // User message is persisted before provider call intentionally.
+    // If AI generation fails, the student's message remains in history
+    // but no assistant message is inserted, preserving history integrity.
+    try {
+      assistantMessage = await generateChatResponse({
+        studentMessage: message,
+        personalizationMarkdown: studentRecord.active_personalization_md,
+        tutorEnrichmentMarkdown: studentCourseTutor?.active_skill_md ?? null,
+        courseContextMarkdown,
+        conversationHistory,
+      });
+    } catch (providerError) {
+      console.error("AI_PROVIDER_ERROR", (providerError as Error).message);
+      return NextResponse.json(
+        {
+          error: "ai_provider_error",
+          message:
+            "The AI provider failed to generate a response. Please try again.",
+        },
+        { status: 502 }
+      );
+    }
 
-    await admin.from("chat_messages").insert({
+    const { error: assistantInsertError } = await admin.from("chat_messages").insert({
       session_id: resolvedSessionId,
       role: "assistant",
       content: assistantMessage,
     });
+
+    if (assistantInsertError) {
+      console.error("CHAT_MESSAGE_INSERT_ERROR", assistantInsertError.message);
+      return NextResponse.json(
+        { error: "internal_error", message: "Could not persist response." },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json(
       {
@@ -271,7 +351,7 @@ Según el material disponible para este curso, puedo ayudarte usando explicacion
       { status: 201 }
     );
   } catch (error) {
-    console.error("CHAT_ERROR", error);
+    console.error("CHAT_ERROR", (error as Error).message);
 
     return NextResponse.json(
       { error: "internal_error", message: "Unexpected chat error." },

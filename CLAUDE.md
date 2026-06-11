@@ -19,14 +19,37 @@ There is no test suite configured.
 Required in `.env.local`:
 
 ```
-NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_ANON_KEY=
-SUPABASE_SERVICE_ROLE_KEY=
-AI_PROVIDER=mock          # or "anthropic"
-ANTHROPIC_API_KEY=        # required only when AI_PROVIDER=anthropic
+# Supabase (required)
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+
+# AI Provider (default: mock)
+AI_PROVIDER=mock          # Options: mock | nvidia-nim | openai | anthropic
+
+# NVIDIA NIM — required only when AI_PROVIDER=nvidia-nim
+NVIDIA_NIM_API_KEY=<your-nvidia-nim-api-key>
+NVIDIA_NIM_BASE_URL=https://integrate.api.nvidia.com/v1    # optional; defaults to this
+NVIDIA_NIM_MODEL=meta/llama-3.3-70b-instruct               # optional; defaults to this
+
+# OpenAI — required only when AI_PROVIDER=openai (not yet implemented, throws)
+OPENAI_API_KEY=sk-...
+
+# Anthropic — required only when AI_PROVIDER=anthropic (not yet implemented, throws)
+ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-`lib/env.ts` validates these at runtime; `validateEnv()` is called inside `createAdminClient()`.
+**Validation:**
+- `lib/env.ts` exports `validateEnv()` and `env` object. `validateEnv()` is called inside `createAdminClient()` at startup.
+- If `AI_PROVIDER` is unrecognized, startup fails immediately.
+- If `AI_PROVIDER=nvidia-nim` but `NVIDIA_NIM_API_KEY` is missing, startup fails.
+- If `AI_PROVIDER=openai` but `OPENAI_API_KEY` is missing, startup fails.
+- If `AI_PROVIDER=anthropic` but `ANTHROPIC_API_KEY` is missing, startup fails.
+
+**Dev vs. production:**
+- `.env.example` (committed) contains only placeholder values — safe to check in.
+- `.env.local` (git-ignored) holds real keys and is never committed.
+- Default `AI_PROVIDER=mock` requires no keys and is safe for development.
 
 ## Architecture
 
@@ -105,12 +128,108 @@ Tutors can optionally create surveys to enrich the student's base personalizatio
 
 `skill.md` is a structured markdown persona validated by `lib/ai/validate-skill-md.ts` (7 required sections). Used only when tutor provides input; not required for chat.
 
-`AI_PROVIDER=mock` (default) returns a hardcoded response. The Anthropic branch in `lib/chat/provider.ts` currently throws — not yet implemented.
+**AI provider adapter:**
 
-**Chat prompt structure:**
-- PERFIL DE PERSONALIZACIÓN DEL ESTUDIANTE (required, from student onboarding)
-- ENRIQUECIMIENTO DEL TUTOR (optional, from tutor survey if promoted)
-- MATERIAL DEL CURSO (required, from compiled student uploads)
+Entry point: `lib/chat/provider.ts` — reads `env.aiProvider` and dispatches to the appropriate provider. With Phase B, providers receive a **messages array** (conversation history support) instead of separate `systemPrompt` and `userPrompt`.
+
+Provider message structure (after Phase A/B):
+```typescript
+interface ProviderInput {
+  messages: Array<{
+    role: "system" | "user" | "assistant";
+    content: string;
+  }>;
+}
+```
+
+Messages array construction:
+1. First message: `{ role: "system", content: systemPrompt }` (see system prompt structure above)
+2. Prior messages: conversation history (up to 10 messages from current session)
+3. Last message: `{ role: "user", content: currentUserMessage }`
+
+Providers:
+- **`lib/chat/providers/openai-compatible.ts`** — shared HTTP client for OpenAI-compatible APIs. Uses native `fetch`, no SDK. 30-second timeout via AbortController. Receives full messages array with history and retrieved course context. Used by NVIDIA NIM and future compatible APIs.
+- **`lib/chat/providers/nvidia-nim.ts`** — NVIDIA NIM adapter. Reads `NVIDIA_NIM_API_KEY`, `NVIDIA_NIM_BASE_URL` (optional, defaults to `https://integrate.api.nvidia.com/v1`), and `NVIDIA_NIM_MODEL` (optional, defaults to `meta/llama-3.3-70b-instruct`) from env. Dispatches to `openai-compatible.ts` with full message array.
+- **`lib/chat/providers/openai.ts`** — stub. Throws "OpenAI provider is not yet implemented".
+- **`lib/chat/providers/anthropic.ts`** — stub. Throws "Anthropic provider is not yet implemented".
+
+Supporting:
+- **`lib/chat/build-chat-prompt.ts`** — builds `systemPrompt` from student personalization, tutor enrichment (optional), and retrieved course sections. This is the **only** source of system instructions and REGLA ABSOLUTA. Caller constructs the full messages array and passes it to the provider.
+- **`lib/chat/mock-response.ts`** — mock response generator for development. Receives conversation history length only (count of prior messages, not raw text). Simulates realistic behavior without calling real APIs. Does **not** echo raw personalization or skill markdown to the client.
+
+Provider contract: `generateChatResponse(input: ProviderInput)` → `Promise<string>` (assistant message text). On any error (network, timeout, provider returns 4xx/5xx, malformed response), throws. Route handler catches and returns 502 `ai_provider_error`.
+
+Security guardrails:
+- API keys are read from `env` object only — never hardcoded, logged, or returned in responses.
+- Providers receive only the `messages` array (system prompt + history + current message) — they cannot access student ID, course ID, session ID, or raw profile data.
+- `buildChatPrompt` is the sole source of system instructions and cannot be bypassed.
+- Retrieved course sections are pre-filtered and embedded in the system prompt; raw storage paths or retrieval scores are never exposed.
+- Mock provider receives only history count; full history text is not accessible to it.
+- Message persistence happens before and after provider calls, with explicit error handling.
+
+**Chat Memory (Phase A) — Conversation history**
+
+Each `POST /api/chat` request retrieves the most recent 10 messages from the current session (ordered by `created_at ASC`, filtered to `role IN ('user', 'assistant')`). History is fetched **after** session ownership is confirmed via `getStudentSessionAccessContext()` and **before** the current user message is inserted. This ensures:
+- No cross-session history bleed (strict scoping by `sessionId`)
+- Current turn is not included in history (only prior messages)
+- History fetch failure is non-fatal; chat continues with empty history
+
+The conversation history is formatted as a messages array passed to the provider:
+```
+[
+  { role: "system", content: systemPrompt },
+  ...conversationHistory,  // up to 10 prior messages
+  { role: "user", content: currentUserMessage }
+]
+```
+
+Mock provider receives only the `conversationHistoryLength` (count of messages) — it does not receive or echo raw message content. NVIDIA NIM and OpenAI-compatible providers receive the full array with all history text.
+
+**Course-Scope Retrieval and Hard Refusal (Phase B)**
+
+Compiled course markdown is no longer injected in full. Instead, `retrieveRelevantCourseSections()` selects relevant sections based on keyword/token overlap:
+
+- **Query construction:** concatenates current message + last assistant turn (if any) + last 2 user turns into a single query string
+- **Scoring:** token intersection (unique tokens in section ∩ query) normalized by query token count, +0.15 bonus for heading match
+- **Threshold:** 0.08 minimum relevance score
+- **Top-K:** 4 sections (sorted by score descending)
+- **Character budget:** total output capped at 6000 chars
+- **Continuation bypass:** if conversation is established AND current message is short (<60 chars) AND tokens are low (<3), skip threshold check and rank by score only (allows natural follow-ups like "¿Y entonces?")
+
+If no relevant sections found (all scores < 0.08):
+- User message is persisted to database
+- No AI provider is called
+- Deterministic refusal is returned as assistant message
+- Response: `{ success: true, sessionId, assistantMessage: "No encontré información sobre eso en el material de este curso. Te recomiendo revisar tus apuntes o consultar con tu tutor." }`
+
+If relevant sections found:
+- Sections are formatted and passed as `courseContextMarkdown` to the provider
+- Provider is called with the full [system, ...history, user] message array
+
+**System prompt structure (with Phase B hard refusal layer):**
+
+The system prompt is built in this order:
+1. **REGLA ABSOLUTA** (first, non-bypassable, compile-time constant):
+   ```
+   REGLA ABSOLUTA:
+   Solo responde usando el MATERIAL DEL CURSO RELEVANTE incluido a continuación.
+   Si la respuesta no está en ese material, responde exactamente:
+   "No encontré información sobre eso en el material de este curso. Te recomiendo revisar tus apuntes o consultar con tu tutor."
+   No uses conocimiento general bajo ninguna circunstancia.
+   ```
+2. Persona declaration
+3. Behavior rules
+4. Student personalization markdown (from `active_personalization_md`)
+5. Optional tutor enrichment (from `active_skill_md`, if promoted survey exists)
+6. Retrieved course sections (header: `MATERIAL DEL CURSO RELEVANTE PARA ESTA PREGUNTA:`)
+
+**Message persistence with explicit error checking:**
+
+All three insertion paths (user, refusal, assistant) include explicit error handling:
+- User message inserted before AI call (error → 500)
+- Refusal message inserted on hard refusal (error → 500)
+- Assistant message inserted after provider response (error → 500)
+- Errors logged; generic message returned to client
 
 ### Student onboarding & personalization
 
@@ -205,6 +324,21 @@ Students upload PDF/DOCX. Route handlers: upload → extract (mammoth for DOCX, 
 - Returns `{ success: true, session_id: <uuid> }` on success.
 - The UI (`SessionActions` component, receiving `sessionCount` as a prop from the layout) displays a warning and disables the "Nuevo chat" button when the student has 3 active sessions.
 
+### Chat API error handling & resilience
+
+**Provider failure (AI generation errors):**
+- If the AI provider fails (network error, timeout, HTTP 4xx/5xx, malformed response), the route catches the exception and returns 502 `ai_provider_error` with a safe client message.
+- **Intentional design:** User message is persisted to the database **before** calling the provider. If the provider fails, the student's message remains in chat history but no assistant message is inserted. This preserves history integrity and ensures user input is never lost.
+- No silent fallback from real providers (e.g., `nvidia-nim`) to mock on failure — errors propagate and are visible to the student.
+
+**Context download failure:**
+- If compiled course material cannot be downloaded from Supabase Storage, the route returns 500 `context_download_failed` with a generic message.
+- Error messages from storage are **not** returned to client (prevents leaking internal paths or storage details).
+
+**Session limit reached:**
+- If a student tries to create a 4th active session for a course, the RPC atomically prevents it and returns 409 `session_limit_reached`.
+- Client-side: `ChatBox` shows the error and **preserves the typed message** so the student does not lose input.
+
 ### Route structure
 
 ```
@@ -237,6 +371,38 @@ app/
         route.ts        GET: list active sessions per course (POST removed — lazy create only)
         [sessionId]/route.ts (POST: { title } to rename; POST: { action: "delete" } to soft-delete; no HTTP DELETE method)
 ```
+
+### Chat security & data isolation (Phases A + B)
+
+**Authentication & authorization:**
+- `POST /api/chat` uses `requireApprovedApiUser()` — authenticated students only
+- Conversation history is fetched only after session ownership is confirmed via `getStudentSessionAccessContext()`
+- Course context retrieval uses only the validated `student_id` and `course_id` from the session context
+- Students can only send messages to sessions they own; cross-session access returns 404
+
+**History scoping (Phase A):**
+- Conversation history is strict scoped by `sessionId`; no cross-session bleed possible
+- History includes only `role IN ('user', 'assistant')`; system messages are not stored/retrieved
+- History window: most recent 10 messages; older messages never sent to provider
+- History fetch failure is non-fatal; chat continues with empty history (graceful degradation)
+
+**Course context retrieval (Phase B):**
+- Retrieved sections come only from the compiled markdown for the validated student+course pair
+- No full compiled blob is passed to any provider; only relevant top-4 sections (max 6000 chars)
+- Retrieved section scores are computed server-side; scores and raw retrieval metadata never exposed to client
+- Hard refusal (no sections found) is deterministic; refusal text is a compile-time constant, not interpolated
+
+**Message persistence:**
+- User messages are persisted before any AI call or retrieval attempt (ensures input is never lost)
+- Refusal messages (Phase B) are persisted only if no relevant sections found
+- Assistant messages are persisted after provider call succeeds
+- All three paths include explicit error checking; insert failures return 500 with generic message
+- If insert fails, the client is informed of the error (not silently dropped)
+
+**Response body structure:**
+- Client receives only `{ success: true/false, sessionId, assistantMessage }` and error codes
+- No history is returned; no retrieval scores; no course sections; no internal metadata
+- Error messages are safe (no stack traces, storage paths, or provider details leaked)
 
 ### Admin course restore
 
@@ -294,6 +460,58 @@ Multi-session chat required four migrations (in order):
    - Uses `pg_advisory_xact_lock(hashtext(student_id || ':' || course_id)::bigint)` to serialize concurrent creates for the same (student, course)
    - Guarantees atomicity: no two concurrent requests can both pass the count check and create a 4th session
 
-### Styling
+### Chat testing & validation (manual checklist)
+
+Before deploying Phases A + B to production:
+- [ ] **In-scope question:** Message with clear course terminology triggers retrieval, sections found, provider called, answer grounded in retrieved sections
+- [ ] **Out-of-scope question:** Message about topic not in course (e.g., AWS in Finance course) returns zero sections, provider NOT called, fixed refusal returned 200 with `success: true`
+- [ ] **Short follow-up:** Message like "¿Y entonces?" triggers continuation bypass, provider called despite short message, conversation flows naturally
+- [ ] **New session (Phase A):** Create new session, send first message, history is empty, session created successfully
+- [ ] **Existing session (Phase A):** Send message in established session, history includes prior messages, conversation context is maintained
+- [ ] **History length:** Verify history window is max 10 messages; older messages never sent to provider
+- [ ] **Max 3 sessions:** Attempt to create 4th session returns 409, message preserved, subsequent sessions still work
+- [ ] **Mock provider:** `AI_PROVIDER=mock` works, response synthesized, history count logged, no raw context leaked
+- [ ] **NVIDIA NIM provider:** `AI_PROVIDER=nvidia-nim` works, REGLA ABSOLUTA in system prompt, history in messages array, retrieved sections in context
+- [ ] **Cross-session IDOR:** POST `/api/chat` with `sessionId` from another course/student returns 404
+- [ ] **Auth failure:** Non-student role returns 403; incomplete personalization returns 403; unauthenticated returns 401
+- [ ] **Message persistence:** User message saved; provider failure (502) does not erase user message; refusal (200) has assistant message saved
+- [ ] **Error responses:** No retrieval scores, no storage paths, no raw sections in error messages; only `success`, `sessionId`, `assistantMessage`, and error codes
+
+Run: `npm run lint && npm run build`
+
+### Known limitations & future work
+
+**Phase A (Conversation Memory):**
+- No session search/filtering yet; students must scroll session list to find old sessions
+- History is fetched fresh on each request; no caching layer between requests in same session
+- 10-message window is fixed; no user preference to adjust history depth
+
+**Phase B (Course-Scope Retrieval & Hard Refusal):**
+- Keyword/token overlap is simple cosine-like scoring; no semantic understanding
+- Threshold (0.08) and top-K (4) are hardcoded; may need tuning based on real-course results
+- No deduplication of similar sections; continuation chunks can dominate top-K results
+- Hard refusal is deterministic (Phase B Layer 1); no fall-through to general knowledge (intentional)
+- Future optional Layer 2: backend validation gate to catch edge cases where REGLA ABSOLUTA is violated by provider
+
+**Phase C (Semantic RAG — planned, not yet implemented):**
+- Requires PostgreSQL `pgvector` extension
+- Requires embedding model and schema migration (`embeddings` column on sections)
+- At compile time: extract sections and embed them once
+- At query time: embed current query and use cosine similarity for ranking
+- Better relevance than token overlap; more resilient to paraphrasing
+- Timeline: Phase C roadmapped after Phase A + B validated in production (2026 Q2 likely)
+
+**Rate limiting:**
+- Authenticated students can currently drive AI provider cost via repeated `POST /api/chat` requests
+- No per-student rate limit yet; future: add sliding-window rate limit (e.g., 10 messages/minute per student)
+- Prevents abuse by malicious accounts; protects NVIDIA NIM quota
+
+**Retrieval quality monitoring:**
+- Threshold (0.08), top-K (4), and character budget (6000) are based on initial testing
+- No analytics on refusal rate, section relevance, or student satisfaction
+- Future: log retrieval metadata (scores, sections returned, refusal vs. found) for analysis
+- May inform threshold tuning or help identify courses with poor section quality
+
+**Styling:**
 
 Tailwind CSS v4 (PostCSS). Design tokens are inline — primary blue `#2E6F87`, background `#F7F5F0`, text `#1C2E36`. No CSS variables or design system file.

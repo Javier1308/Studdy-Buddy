@@ -1,15 +1,28 @@
+export interface ConversationTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
 export function buildChatPrompt({
   studentMessage,
   personalizationMarkdown,
   tutorEnrichmentMarkdown,
   courseContextMarkdown,
+  conversationHistory,
 }: {
   studentMessage: string;
   personalizationMarkdown: string;
   tutorEnrichmentMarkdown?: string | null;
   courseContextMarkdown: string;
+  conversationHistory?: ConversationTurn[];
 }) {
   const systemPrompt = `
+REGLA ABSOLUTA:
+Solo responde usando el MATERIAL DEL CURSO RELEVANTE incluido a continuación.
+Si la respuesta no está en ese material, responde exactamente:
+"No encontré información sobre eso en el material de este curso. Te recomiendo revisar tus apuntes o consultar con tu tutor."
+No uses conocimiento general bajo ninguna circunstancia.
+
 Eres Buddy IA, un asistente de estudio personalizado.
 
 Debes responder usando:
@@ -34,12 +47,13 @@ ${tutorEnrichmentMarkdown}
 
 `
     : ""
-}MATERIAL DEL CURSO:
+}MATERIAL DEL CURSO RELEVANTE PARA ESTA PREGUNTA:
 ${courseContextMarkdown || "No hay material compilado del curso."}
 `.trim();
 
   return {
     systemPrompt,
     userPrompt: studentMessage,
+    conversationHistory: conversationHistory ?? [],
   };
 }

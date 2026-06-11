@@ -35,12 +35,14 @@ export function generateMockChatResponse({
   hasContext,
   skillPreview,
   contextPreview,
+  conversationHistoryLength,
 }: {
   message: string;
   hasSkill: boolean;
   hasContext: boolean;
   skillPreview?: string;
   contextPreview?: string;
+  conversationHistoryLength?: number;
 }) {
   const relevantSnippet = contextPreview
     ? findRelevantSnippet(contextPreview, message)
@@ -54,6 +56,7 @@ Entendí tu pregunta:
 Contexto usado:
 - Perfil personalizado activo: ${hasSkill ? "sí" : "no"}
 - Material del curso compilado: ${hasContext ? "sí" : "no"}
+- Turnos previos en sesión: ${conversationHistoryLength ?? 0}
 
 Respuesta simulada:
 Antes de resolver un ejercicio de matemática financiera, debes identificar los datos principales del enunciado:
