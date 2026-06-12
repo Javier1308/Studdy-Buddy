@@ -130,22 +130,27 @@ Tutors can optionally create surveys to enrich the student's base personalizatio
 
 **AI provider adapter:**
 
-Entry point: `lib/chat/provider.ts` — reads `env.aiProvider` and dispatches to the appropriate provider. With Phase B, providers receive a **messages array** (conversation history support) instead of separate `systemPrompt` and `userPrompt`.
+Entry point: `lib/chat/provider.ts` — reads `env.aiProvider` and dispatches to the appropriate provider.
 
-Provider message structure (after Phase A/B):
+Route handler calls `generateChatResponse` with named fields:
 ```typescript
-interface ProviderInput {
-  messages: Array<{
-    role: "system" | "user" | "assistant";
-    content: string;
-  }>;
+interface GenerateChatResponseInput {
+  studentMessage: string;
+  personalizationMarkdown: string;
+  tutorEnrichmentMarkdown?: string | null;
+  courseContextMarkdown: string;
+  conversationHistory?: ConversationMessage[];
 }
 ```
 
-Messages array construction:
-1. First message: `{ role: "system", content: systemPrompt }` (see system prompt structure above)
-2. Prior messages: conversation history (up to 10 messages from current session)
-3. Last message: `{ role: "user", content: currentUserMessage }`
+Internally, `provider.ts` calls `buildChatPrompt` to produce `systemPrompt` + `userPrompt`, then each sub-provider assembles the final messages array:
+```
+[
+  { role: "system", content: systemPrompt },
+  ...conversationHistory,  // up to 10 prior messages
+  { role: "user", content: userPrompt }
+]
+```
 
 Providers:
 - **`lib/chat/providers/openai-compatible.ts`** — shared HTTP client for OpenAI-compatible APIs. Uses native `fetch`, no SDK. 30-second timeout via AbortController. Receives full messages array with history and retrieved course context. Used by NVIDIA NIM and future compatible APIs.
@@ -155,9 +160,9 @@ Providers:
 
 Supporting:
 - **`lib/chat/build-chat-prompt.ts`** — builds `systemPrompt` from student personalization, tutor enrichment (optional), and retrieved course sections. This is the **only** source of system instructions and REGLA ABSOLUTA. Caller constructs the full messages array and passes it to the provider.
-- **`lib/chat/mock-response.ts`** — mock response generator for development. Receives conversation history length only (count of prior messages, not raw text). Simulates realistic behavior without calling real APIs. Does **not** echo raw personalization or skill markdown to the client.
+- **`lib/chat/mock-response.ts`** — mock response generator for development. Receives: user message text, `hasSkill`/`hasContext` boolean flags, capped previews of skill markdown (≤800 chars) and course context markdown (≤1200 chars), and `conversationHistoryLength` (count only). Does **not** receive raw profile data, session ID, course ID, or full conversation history text.
 
-Provider contract: `generateChatResponse(input: ProviderInput)` → `Promise<string>` (assistant message text). On any error (network, timeout, provider returns 4xx/5xx, malformed response), throws. Route handler catches and returns 502 `ai_provider_error`.
+Provider contract: `generateChatResponse(input: GenerateChatResponseInput)` → `Promise<string>` (assistant message text). On any error (network, timeout, provider returns 4xx/5xx, malformed response), throws. Route handler catches and returns 502 `ai_provider_error`.
 
 Security guardrails:
 - API keys are read from `env` object only — never hardcoded, logged, or returned in responses.
@@ -169,7 +174,7 @@ Security guardrails:
 
 **Chat Memory (Phase A) — Conversation history**
 
-Each `POST /api/chat` request retrieves the most recent 10 messages from the current session (ordered by `created_at ASC`, filtered to `role IN ('user', 'assistant')`). History is fetched **after** session ownership is confirmed via `getStudentSessionAccessContext()` and **before** the current user message is inserted. This ensures:
+Each `POST /api/chat` request fetches the 10 most recent messages from the current session (`ORDER BY created_at DESC LIMIT 10`), reverses them in memory to chronological order, and filters to `role === 'user' | 'assistant'` in application code. History is fetched **after** session ownership is confirmed via `getStudentSessionAccessContext()` and **before** the current user message is inserted. This ensures:
 - No cross-session history bleed (strict scoping by `sessionId`)
 - Current turn is not included in history (only prior messages)
 - History fetch failure is non-fatal; chat continues with empty history
@@ -291,7 +296,7 @@ Students upload PDF/DOCX. Route handlers: upload → extract (mammoth for DOCX, 
 - Before allowing session creation, `POST /api/chat` checks that `students.active_personalization_md IS NOT NULL`. If null, returns 403 `personalization_not_complete`. This prevents creation of phantom sessions for students who haven't completed onboarding.
 
 **Auto-generated title + manual rename:**
-- When creating a session via first message (`POST /api/chat` without `sessionId`), the title is auto-generated from the first ~60 characters of the user's message (truncated on a word boundary).
+- When creating a session via first message (`POST /api/chat` without `sessionId`): if the first message is social (greeting, thanks, or meta question), the title is `"Nuevo chat"`; otherwise the title is auto-generated from the first ~60 characters of the message (truncated on a word boundary). See **Social intent routing** for the full title logic.
 - Students can rename via the three-dot context menu in the sidebar (`RenameSessionDialog`), which posts to `POST /api/chat/sessions/[sessionId]` with `{ title }` (1–80 characters, trimmed and validated server-side).
 - Session title is displayed in `SessionHeader` as a plain read-only heading; edit/delete buttons have been removed from the header and moved to the sidebar context menu.
 
@@ -445,7 +450,7 @@ app/
 
 **Course context retrieval (Phase B):**
 - Retrieved sections come only from the compiled markdown for the validated student+course pair
-- No full compiled blob is passed to any provider; only relevant top-4 sections (max 6000 chars)
+- No full compiled blob is passed to any provider; only relevant top-6 sections (max 6000 chars)
 - Retrieved section scores are computed server-side; scores and raw retrieval metadata never exposed to client
 - Hard refusal (no sections found) is deterministic; refusal text is a compile-time constant, not interpolated
 
