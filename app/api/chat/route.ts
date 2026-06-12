@@ -10,6 +10,12 @@ import { retrieveRelevantCourseSections } from "@/lib/chat/retrieve-context-sect
 const OUT_OF_SCOPE_REFUSAL =
   "No encontré información sobre eso en el material de este curso. Te recomiendo revisar tus apuntes o consultar con tu tutor.";
 
+const SOCIAL_REDIRECT =
+  "¡Hola! Soy Buddy IA. ¿Qué tema del curso quieres repasar hoy?";
+
+const SOCIAL_ACKNOWLEDGMENT =
+  "¡Con gusto! Cuando quieras, seguimos repasando el material del curso.";
+
 const schema = z.object({
   courseId: z.string().uuid(),
   message: z.string().min(1).max(4000),
@@ -46,6 +52,48 @@ export async function POST(request: Request) {
 
     const admin = createAdminClient();
     const { courseId, message, sessionId } = parsed.data;
+
+    // Helper: generate session title from message text (hoisted for reuse)
+    const generateTitle = (text: string): string => {
+      const trimmed = text.trim();
+      if (trimmed.length <= 60) return trimmed;
+      const truncated = trimmed.slice(0, 60);
+      const lastSpace = truncated.lastIndexOf(" ");
+      return lastSpace > 0 ? truncated.slice(0, lastSpace) : truncated;
+    };
+
+    // Tier 0: Reject messages that contain no meaningful content beyond whitespace/punctuation.
+    // Note: Zod min(1) already catches empty strings. This catches whitespace-only or symbol-only.
+    const trimmedMessage = message.trim();
+    if (!trimmedMessage || /^[\s\W]+$/.test(trimmedMessage)) {
+      return NextResponse.json(
+        { error: "invalid_payload", message: "Message contains no meaningful content." },
+        { status: 400 }
+      );
+    }
+
+    // Social intent classifier: detect greetings, thanks, and meta questions.
+    // Returns a fixed reply string if social intent is detected, undefined otherwise.
+    function classifySocialIntent(text: string): string | undefined {
+      const t = text.trim().toLowerCase();
+
+      // Greetings
+      if (/^(hola|hi|hello|hey|buenas|buenos\s+días|buenas\s+tardes|buenas\s+noches|buen\s+día)[!?.¡¿,]*$/.test(t)) {
+        return SOCIAL_REDIRECT;
+      }
+
+      // Thanks
+      if (/^(gracias|thanks|thank\s+you|muchas\s+gracias|ok\s+gracias|ok)[!?.¡¿,]*$/.test(t)) {
+        return SOCIAL_ACKNOWLEDGMENT;
+      }
+
+      // Meta questions about the assistant
+      if (/^(quién\s+eres|quien\s+eres|qué\s+eres|que\s+eres|qué\s+puedes\s+hacer|que\s+puedes\s+hacer|cómo\s+funciona|como\s+funciona)[?!.¡¿]*$/.test(t)) {
+        return SOCIAL_REDIRECT;
+      }
+
+      return undefined;
+    }
 
     const studentCourseAccess = await getStudentCourseAccessContext({
       user: approvedUser,
@@ -109,16 +157,11 @@ export async function POST(request: Request) {
     } else {
       // Create new session — atomically checks max-3 limit and inserts via RPC
       // to eliminate the race condition between a count check and insert.
-      const generateTitle = (text: string): string => {
-        const trimmed = text.trim();
-        if (trimmed.length <= 60) return trimmed;
-
-        const truncated = trimmed.slice(0, 60);
-        const lastSpace = truncated.lastIndexOf(" ");
-        return lastSpace > 0 ? truncated.slice(0, lastSpace) : truncated;
-      };
-
-      const title = generateTitle(message);
+      // Social first messages get a generic title; academic first messages get
+      // a content-derived title.
+      const title = classifySocialIntent(message) !== undefined
+        ? "Nuevo chat"
+        : generateTitle(message);
 
       const { data: rpcResult, error: rpcError } = await admin.rpc(
         "create_chat_session_with_limit",
@@ -180,6 +223,49 @@ export async function POST(request: Request) {
           m.role === "user" || m.role === "assistant"
       );
 
+    // Social branch: if the message is a greeting, thanks, or meta question,
+    // return a fixed redirect reply without fetching course data, downloading context,
+    // running retrieval, or calling the AI provider.
+    // All required guards have passed at this point:
+    //   - requireApprovedApiUser() ✓
+    //   - role === "student" ✓
+    //   - getStudentCourseAccessContext() ✓
+    //   - personalization gate ✓
+    //   - resolvedSessionId confirmed ✓
+    const socialReply = classifySocialIntent(message);
+    if (socialReply !== undefined) {
+      const { error: socialUserMsgError } = await admin.from("chat_messages").insert({
+        session_id: resolvedSessionId,
+        role: "user",
+        content: message,
+      });
+      if (socialUserMsgError) {
+        console.error("CHAT_MESSAGE_INSERT_ERROR", socialUserMsgError.message);
+        return NextResponse.json(
+          { error: "internal_error", message: "Could not persist message." },
+          { status: 500 }
+        );
+      }
+
+      const { error: socialAssistantMsgError } = await admin.from("chat_messages").insert({
+        session_id: resolvedSessionId,
+        role: "assistant",
+        content: socialReply,
+      });
+      if (socialAssistantMsgError) {
+        console.error("CHAT_MESSAGE_INSERT_ERROR", socialAssistantMsgError.message);
+        return NextResponse.json(
+          { error: "internal_error", message: "Could not persist response." },
+          { status: 500 }
+        );
+      }
+
+      return NextResponse.json(
+        { success: true, sessionId: resolvedSessionId, assistantMessage: socialReply },
+        { status: 201 }
+      );
+    }
+
     const [{ data: course }, { data: studentCourseTutor }, { data: context }] =
       await Promise.all([
         admin
@@ -210,6 +296,25 @@ export async function POST(request: Request) {
         { error: "course_not_found", message: "Course not found." },
         { status: 404 }
       );
+    }
+
+    // If this is an existing session whose title is still the default "Nuevo chat",
+    // and the current message is academic (social branch already exited above),
+    // update the title to a content-derived value.
+    // Uses .eq("title", "Nuevo chat") predicate so manual renames are never overwritten.
+    // Non-fatal: log and continue on error.
+    if (sessionId) {
+      const derivedTitle = generateTitle(message);
+      const { error: titleUpdateError } = await admin
+        .from("chat_sessions")
+        .update({ title: derivedTitle })
+        .eq("id", resolvedSessionId)
+        .eq("title", "Nuevo chat");
+
+      if (titleUpdateError) {
+        console.error("CHAT_SESSION_TITLE_UPDATE_ERROR", titleUpdateError.message);
+        // Non-fatal: continue with existing title
+      }
     }
 
     if (context?.compile_status !== "completed" || !context?.storage_path) {

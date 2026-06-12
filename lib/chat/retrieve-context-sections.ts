@@ -17,8 +17,8 @@ export interface ScoredSection extends Section {
 // Constants
 // ---------------------------------------------------------------------------
 
-const TOP_K = 4;
-const SCORE_THRESHOLD = 0.08;
+const TOP_K = 6;
+const SCORE_THRESHOLD = 0.05;
 const MAX_SECTION_CHARS = 2000;
 const MAX_OUTPUT_CHARS = 6000;
 

@@ -191,12 +191,12 @@ Compiled course markdown is no longer injected in full. Instead, `retrieveReleva
 
 - **Query construction:** concatenates current message + last assistant turn (if any) + last 2 user turns into a single query string
 - **Scoring:** token intersection (unique tokens in section ∩ query) normalized by query token count, +0.15 bonus for heading match
-- **Threshold:** 0.08 minimum relevance score
-- **Top-K:** 4 sections (sorted by score descending)
+- **Threshold:** 0.05 minimum relevance score
+- **Top-K:** 6 sections (sorted by score descending)
 - **Character budget:** total output capped at 6000 chars
 - **Continuation bypass:** if conversation is established AND current message is short (<60 chars) AND tokens are low (<3), skip threshold check and rank by score only (allows natural follow-ups like "¿Y entonces?")
 
-If no relevant sections found (all scores < 0.08):
+If no relevant sections found (all scores < 0.05):
 - User message is persisted to database
 - No AI provider is called
 - Deterministic refusal is returned as assistant message
@@ -339,6 +339,63 @@ Students upload PDF/DOCX. Route handlers: upload → extract (mammoth for DOCX, 
 - If a student tries to create a 4th active session for a course, the RPC atomically prevents it and returns 409 `session_limit_reached`.
 - Client-side: `ChatBox` shows the error and **preserves the typed message** so the student does not lose input.
 
+### Social intent routing
+
+Pure social messages (greetings, thanks, meta questions about the assistant) are intercepted before course context retrieval and AI provider calls. These messages receive fixed warm replies and skip the academic pipeline entirely. This reduces unnecessary retrieval overhead and provides immediate, contextually appropriate responses.
+
+**Tier 0 (empty/junk):**
+- Rejects messages with no meaningful content beyond whitespace, punctuation, or symbols (e.g., `"   "`, `"!!!"`)
+- Returns 400 `invalid_payload` — no session created, message not persisted
+- The Zod validation (`min(1)`) catches completely empty strings; Tier 0 catches whitespace-only variants
+
+**Tier 1 (social intent):**
+- **Greetings** (hola, hi, hello, hey, buenas, buenos días, etc.)
+  ```
+  "¡Hola! Soy Buddy IA. ¿Qué tema del curso quieres repasar hoy?"
+  ```
+- **Thanks** (gracias, muchas gracias, ok, thanks, thank you, etc.)
+  ```
+  "¡Con gusto! Cuando quieras, seguimos repasando el material del curso."
+  ```
+- **Meta questions** (quién eres, qué eres, qué puedes hacer, cómo funciona, etc.)
+  ```
+  "¡Hola! Soy Buddy IA. ¿Qué tema del curso quieres repasar hoy?"
+  ```
+
+**Matching strategy:**
+- All patterns are **whole-message anchored** (start and end of string). Trailing punctuation is ignored.
+- Mixed messages like "Hola, ¿cuál es la fórmula de X?" are **not** classified as social. The classifier returns `undefined`, and the message proceeds to academic retrieval and provider.
+
+**Social message persistence:**
+- Both user message and fixed assistant reply are inserted into `chat_messages`
+- Returns 201 `{ success: true, sessionId, assistantMessage: <fixedReply> }`
+- Behavior identical to academic messages: both are persisted, visible in history, and count toward message count
+
+**Social session creation & title:**
+- When creating a new session (no `sessionId` provided) with a social first message, the session title is set to `"Nuevo chat"` (generic)
+- When creating a new session with an academic first message, the title is auto-generated from the first ~60 characters of the message (word-boundary truncated)
+- Social sessions count toward the max-3 active session limit per course
+
+**Title update for academic messages in "Nuevo chat" sessions:**
+- If an existing session has title `"Nuevo chat"` (indicating a social first message) and a subsequent academic message is sent, the title is atomically updated to a content-derived value (first ~60 chars of the academic message, word-boundary truncated)
+- The update is gated on `.eq("title", "Nuevo chat")` to prevent overwriting manually-renamed sessions (titles ≠ "Nuevo chat" are never touched)
+- Non-fatal on error: if the update fails, the session keeps the generic title and chat continues. Error is logged but not returned to the client.
+
+**Bypassed steps (social branch):**
+- Course context download — no compiled markdown is fetched
+- Retrieval — no section scoring or filtering
+- AI provider call — no request to NVIDIA NIM, OpenAI, or other provider
+- Conversation history is **not** used to personalize the social response (fixed replies are context-free)
+- Academic enrichment (student personalization, tutor skill.md) is **not** loaded or consulted
+
+**Unchanged behaviors:**
+- Auth guards (`requireApprovedApiUser()`, `role === "student"`) are always enforced before classification
+- Session ownership validation and personalization gate occur before classification
+- Phase A conversation memory (10-message history retrieval, session-scoped) is unchanged; it is simply not passed to the provider for social messages
+- Phase B hard refusal (zero sections found → fixed academic refusal) is unchanged and applies only to academic messages that reach retrieval
+- Soft-delete and max-3 session limits apply to all sessions regardless of first message type
+- RLS and data isolation rules remain unchanged
+
 ### Route structure
 
 ```
@@ -366,7 +423,7 @@ app/
   api/       route handlers grouped by domain: auth, chat, files, surveys, admin, tutor, profile
     student/onboarding/ POST: saves student's 8 answers + generated personalization profile
     chat/               
-      route.ts          POST: send message (optional sessionId; enforces max-3 active sessions via RPC; auto-generates title from first message)
+      route.ts          POST: send message (optional sessionId; enforces max-3 active sessions via RPC; auto-generates title from first message; classifies social intent and returns fixed replies for greetings/thanks/meta questions)
       sessions/
         route.ts        GET: list active sessions per course (POST removed — lazy create only)
         [sessionId]/route.ts (POST: { title } to rename; POST: { action: "delete" } to soft-delete; no HTTP DELETE method)
@@ -462,7 +519,7 @@ Multi-session chat required four migrations (in order):
 
 ### Chat testing & validation (manual checklist)
 
-Before deploying Phases A + B to production:
+Before deploying Phases A + B + Social Intent Routing to production:
 - [ ] **In-scope question:** Message with clear course terminology triggers retrieval, sections found, provider called, answer grounded in retrieved sections
 - [ ] **Out-of-scope question:** Message about topic not in course (e.g., AWS in Finance course) returns zero sections, provider NOT called, fixed refusal returned 200 with `success: true`
 - [ ] **Short follow-up:** Message like "¿Y entonces?" triggers continuation bypass, provider called despite short message, conversation flows naturally
@@ -476,6 +533,14 @@ Before deploying Phases A + B to production:
 - [ ] **Auth failure:** Non-student role returns 403; incomplete personalization returns 403; unauthenticated returns 401
 - [ ] **Message persistence:** User message saved; provider failure (502) does not erase user message; refusal (200) has assistant message saved
 - [ ] **Error responses:** No retrieval scores, no storage paths, no raw sections in error messages; only `success`, `sessionId`, `assistantMessage`, and error codes
+- [ ] **Pure greeting (Tier 1):** Message "hola" returns 201 `{ success: true, sessionId, assistantMessage: "¡Hola! Soy Buddy IA..." }`, no provider called, session created with title "Nuevo chat"
+- [ ] **Pure thanks (Tier 1):** Message "gracias" returns 201 `{ success: true, ..., assistantMessage: "¡Con gusto! Cuando..." }`, no retrieval, no provider
+- [ ] **Meta question (Tier 1):** Message "quién eres" returns fixed greeting reply, bypasses all academic pipeline
+- [ ] **Mixed message (social + academic):** Message "Hola, ¿cuál es la fórmula?" proceeds to retrieval and provider (not classified as pure social)
+- [ ] **Whitespace/junk (Tier 0):** Message "   " or "!!!" returns 400 `invalid_payload`, no session created
+- [ ] **Social first message in new session:** Title is "Nuevo chat", not derived from message
+- [ ] **Academic message in "Nuevo chat" session:** Title auto-updates to content-derived value (non-fatal if error)
+- [ ] **Social session message count:** Both user and assistant messages increment denormalized counter
 
 Run: `npm run lint && npm run build`
 
@@ -488,7 +553,7 @@ Run: `npm run lint && npm run build`
 
 **Phase B (Course-Scope Retrieval & Hard Refusal):**
 - Keyword/token overlap is simple cosine-like scoring; no semantic understanding
-- Threshold (0.08) and top-K (4) are hardcoded; may need tuning based on real-course results
+- Threshold (0.05) and top-K (6) are tuned to reduce false refusals on paraphrased/synonymous questions
 - No deduplication of similar sections; continuation chunks can dominate top-K results
 - Hard refusal is deterministic (Phase B Layer 1); no fall-through to general knowledge (intentional)
 - Future optional Layer 2: backend validation gate to catch edge cases where REGLA ABSOLUTA is violated by provider
@@ -507,10 +572,10 @@ Run: `npm run lint && npm run build`
 - Prevents abuse by malicious accounts; protects NVIDIA NIM quota
 
 **Retrieval quality monitoring:**
-- Threshold (0.08), top-K (4), and character budget (6000) are based on initial testing
+- Threshold (0.05), top-K (6), and character budget (6000) are empirically tuned to minimize false refusals
 - No analytics on refusal rate, section relevance, or student satisfaction
 - Future: log retrieval metadata (scores, sections returned, refusal vs. found) for analysis
-- May inform threshold tuning or help identify courses with poor section quality
+- May inform further threshold tuning or help identify courses with poor section quality
 
 **Styling:**
 
